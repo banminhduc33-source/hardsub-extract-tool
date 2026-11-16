@@ -7,8 +7,8 @@ on:
         description: "Link Google Drive cua video (Chia se: Bat ky ai co link deu xem duoc)"
         required: false
       video_path:
-        description: "Hoac duong dan video trong repo (vd input/video.mp4)"
-        default: "input/video.mp4"
+        description: "De trong = tu lay video dau tien trong thu muc input/ (hoac ghi duong dan, vd input/tap1.mp4)"
+        default: ""
         required: false
       video_url:
         description: "Hoac link tai video truc tiep khac"
@@ -65,6 +65,14 @@ jobs:
           elif [ -n "$VIDEO_URL" ]; then
             curl -L --fail -o work/video.mp4 "$VIDEO_URL"
           else
+            if [ -z "$VIDEO_PATH" ]; then
+              VIDEO_PATH=$(find input -maxdepth 1 -type f \( -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.webm' -o -iname '*.flv' -o -iname '*.ts' \) | sort | head -1)
+            fi
+            if [ -z "$VIDEO_PATH" ] || [ ! -f "$VIDEO_PATH" ]; then
+              echo "::error::Khong thay video. Bo video vao thu muc input/ hoac dien drive_link / video_url."
+              exit 1
+            fi
+            echo "Dung video: $VIDEO_PATH"
             cp "$VIDEO_PATH" work/video.mp4
           fi
 

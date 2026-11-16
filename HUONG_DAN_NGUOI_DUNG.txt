@@ -24,3 +24,7 @@ MẸO:
 CÁCH NHANH NHẤT (Windows):
   Bấm đúp  Cai_Dat_Mot_Phat.bat  -> tự cài Python (nếu thiếu), thư viện, và tạo
   shortcut "Boc Hardsub" ngoài Desktop. Các lần sau chỉ cần bấm shortcut đó.
+
+DAY CODE LEN GIT (cho nguoi phat trien):
+  Bam dup Day_Len_Git.bat -> dan link repo (tao repo TRONG tren GitHub/GitLab truoc)
+  -> tu add, commit, push. Lan sau chi can bam dup lai de cap nhat.

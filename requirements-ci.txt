@@ -1,0 +1,5 @@
+numpy<2
+opencv-python-headless>=4.8
+pillow>=10.0
+paddlepaddle>=2.6,<3
+paddleocr>=2.7,<3

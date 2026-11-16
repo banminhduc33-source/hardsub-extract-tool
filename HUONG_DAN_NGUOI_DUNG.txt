@@ -30,3 +30,9 @@ DAY CODE LEN GIT (cho nguoi phat trien):
   "hardsub-extract-tool" (rieng tu) tren GitHub, tu commit va push.
   Lan dau se mo trinh duyet de dang nhap GitHub 1 lan. Lan sau bam la xong.
   Muon dung repo co san: dan link vao dong $RemoteUrl trong ci\day_len_git.ps1.
+
+CHAY TREN MAY AO CUA GITHUB (GitHub Actions):
+  1. Day repo len GitHub (Day_Len_Git.bat).
+  2. Vao repo tren web -> tab "Actions" -> "Boc hardsub" -> "Run workflow".
+  3. Dien link video truc tiep (hoac de video trong thu muc input/ roi ghi duong dan).
+  4. Cho chay xong -> mo lan chay do -> muc "Artifacts" -> tai "ketqua-srtpx" (co file .srtpx).

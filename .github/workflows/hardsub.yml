@@ -232,5 +232,3 @@ jobs:
         with:
           name: ketqua-srtpx
           path: out/
-          name: ketqua-srtpx
-          path: out/

@@ -1,0 +1,22 @@
+HƯỚNG DẪN CHO NGƯỜI KHÔNG BIẾT CODE
+===================================
+
+CÀI MỘT LẦN (Windows):
+  1. Cài Python 3.10 hoặc 3.11 từ https://www.python.org/downloads/
+     -> Khi cài, TÍCH vào ô "Add python.exe to PATH".
+  2. Giải nén thư mục này ra chỗ nào cũng được (đừng chạy trực tiếp trong file zip).
+  3. Bấm đúp vào  CHAY_WINDOWS.bat
+     Lần đầu nó tự cài thư viện (vài phút, cần mạng). Từ lần sau mở lên ngay.
+
+DÙNG:
+  1. Bấm "Chọn file..." -> chọn video.
+  2. (Tuỳ chọn) đổi vùng phụ đề / loại chữ Hán.
+  3. Bấm BẮT ĐẦU. Chờ chạy xong.
+  4. Bấm "Mở thư mục kết quả" -> lấy file .srtpx (cạnh video).
+  5. Mở vài ảnh trong thư mục "debug": khung ĐỎ phải bao đúng chữ phụ đề.
+     Mặc định quét toàn bộ khung hình. Muốn nhanh hơn thì đổi "Vùng có phụ đề" thành
+     "Dải dưới 25%" rồi chạy lại.
+
+MẸO:
+  - Video dài: giảm "số khung hình/giây" xuống 10 cho nhanh.
+  - Chạy thử bằng video ngắn 1 phút trước.

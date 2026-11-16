@@ -1,0 +1,19 @@
+# Bắt buộc
+opencv-python-headless>=4.8
+numpy>=1.24
+pillow>=10.0
+
+# OCR engine — chỉ cần cài 1 trong 3, khuyên dùng paddleocr cho tiếng Trung
+# (bỏ comment dòng tương ứng rồi pip install -r requirements.txt)
+
+# --engine paddleocr  (độ chính xác tốt nhất với chữ Hán, có GPU càng nhanh)
+# paddlepaddle
+# paddleocr
+
+# --engine easyocr    (dễ cài, không cần build thêm, hơi chậm hơn paddleocr)
+# easyocr
+
+# --engine tesseract  (đã có sẵn pytesseract, nhưng PHẢI cài thêm gói ngôn ngữ
+#                      của hệ điều hành, ví dụ Ubuntu/Debian:
+#                      sudo apt install tesseract-ocr-chi-sim tesseract-ocr-chi-tra)
+pytesseract>=0.3.10

@@ -20,3 +20,7 @@ DÙNG:
 MẸO:
   - Video dài: giảm "số khung hình/giây" xuống 10 cho nhanh.
   - Chạy thử bằng video ngắn 1 phút trước.
+
+CÁCH NHANH NHẤT (Windows):
+  Bấm đúp  Cai_Dat_Mot_Phat.bat  -> tự cài Python (nếu thiếu), thư viện, và tạo
+  shortcut "Boc Hardsub" ngoài Desktop. Các lần sau chỉ cần bấm shortcut đó.

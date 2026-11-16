@@ -42,7 +42,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
-      REMOTE: gdrive   # TEN remote trong rclone.conf (dong [gdrive]) - sua neu khac
+      REMOTE: gd   # TEN remote trong rclone.conf (dong [gd])
     steps:
       - uses: actions/checkout@v4
 
@@ -76,9 +76,9 @@ jobs:
 
           if [ "$ENABLED" = "true" ]; then
             # Ket qua nam canh video trong srtpx/in -> coi nhu da xu ly
-            rclone lsf "$REMOTE:srtpx/in" --include "*.srtpx" > work/drive_done.txt 2>/dev/null || true
+            rclone lsf --ignore-case "$REMOTE:srtpx/in" --include "*.srtpx" > work/drive_done.txt 2>/dev/null || true
             # Bo qua file vua sua duoi 2 phut (tranh file dang tai len do)
-            rclone lsf "$REMOTE:srtpx/in" --min-age 2m \
+            rclone lsf --ignore-case "$REMOTE:srtpx/in" --min-age 2m \
               --include "*.{mp4,mkv,avi,mov,flv,webm,m4v,ts,wmv}" > work/drive_todo.txt || true
 
             while IFS= read -r f; do
@@ -162,7 +162,7 @@ jobs:
             while IFS= read -r f; do
               n=$(basename "${f%.*}")
               if [ ! -f "output/$n.srtpx" ]; then echo "$f|$n" >> work/queue.txt; fi
-            done < <(find in -maxdepth 1 -type f \( -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.webm' -o -iname '*.flv' -o -iname '*.ts' \) | sort)
+            done < <(find in -maxdepth 1 -type f \( -iname '*.mp4' -o -iname '*.m4v' -o -iname '*.wmv' -o -iname '*.mkv' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.webm' -o -iname '*.flv' -o -iname '*.ts' \) | sort)
           fi
 
           if [ ! -s work/queue.txt ]; then

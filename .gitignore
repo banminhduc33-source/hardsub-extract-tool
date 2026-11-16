@@ -5,3 +5,5 @@ debug/
 *.srtpx
 !demo/*.srtpx
 !output/*.srtpx
+bao_cao_hardsub.txt
+*.bak

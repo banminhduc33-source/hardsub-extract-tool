@@ -1,14 +1,14 @@
 name: Boc hardsub
 
 on:
-  # Tu chay khi co video moi duoc day vao thu muc in/
+  # Tu chay khi co video moi duoc day vao thu muc in/ cua repo
   push:
     paths:
       - "in/**"
-  # Tu quet Google Drive (srtpx/in) moi 15 phut
+  # Du phong: quet Google Drive (srtpx/in) moi gio (Apps Script da goi ngay khi co video)
   schedule:
-    - cron: "*/15 * * * *"
-  # Hoac bam chay tay o tab Actions
+    - cron: "0 * * * *"
+  # Apps Script goi cai nay, hoac bam chay tay o tab Actions
   workflow_dispatch:
     inputs:
       drive_link:
@@ -75,8 +75,8 @@ jobs:
           fi
 
           if [ "$ENABLED" = "true" ]; then
-            # Ket qua da co tren Drive/out -> coi nhu da xu ly
-            rclone lsf "$REMOTE:srtpx/out" --include "*.srtpx" > work/drive_done.txt 2>/dev/null || true
+            # Ket qua nam canh video trong srtpx/in -> coi nhu da xu ly
+            rclone lsf "$REMOTE:srtpx/in" --include "*.srtpx" > work/drive_done.txt 2>/dev/null || true
             # Bo qua file vua sua duoi 2 phut (tranh file dang tai len do)
             rclone lsf "$REMOTE:srtpx/in" --min-age 2m \
               --include "*.{mp4,mkv,avi,mov,flv,webm,m4v,ts,wmv}" > work/drive_todo.txt || true
@@ -84,12 +84,13 @@ jobs:
             while IFS= read -r f; do
               [ -z "$f" ] && continue
               stem="${f%.*}"
-              if [ -f "output/$stem.srtpx" ] || grep -Fxq "$stem.srtpx" work/drive_done.txt; then
+              if grep -Fxq "$stem.srtpx" work/drive_done.txt; then
                 echo "Bo qua (da co ket qua): $f"
                 continue
               fi
               echo "Tai tu Drive: $f"
               if rclone copyto "$REMOTE:srtpx/in/$f" "in/$f" < /dev/null; then
+                rm -f "output/$stem.srtpx"   # video trung ten: bo ket qua cu de boc lai
                 NEW=$((NEW+1))
               else
                 echo "::warning::Loi tai $f"
@@ -104,7 +105,7 @@ jobs:
           echo "go=$GO" >> "$GITHUB_OUTPUT"
           echo "Drive enabled=$ENABLED | video moi=$NEW | chay tiep=$GO"
 
-      # ---------- BOC HARDSUB (GIU NGUYEN NHU CU) ----------
+      # ---------- BOC HARDSUB ----------
       - uses: actions/setup-python@v5
         if: steps.drive.outputs.go == 'true'
         with:
@@ -140,7 +141,7 @@ jobs:
           mkdir -p work out output in
           : > work/queue.txt
 
-          # ---- 1. Lap danh sach video can bóc ----
+          # ---- 1. Lap danh sach video can boc ----
           if [ -n "$DRIVE_LINK" ]; then
             ID=$(echo "$DRIVE_LINK" | grep -oE '[-A-Za-z0-9_]{25,}' | head -1)
             echo "Drive file ID: $ID"
@@ -165,7 +166,7 @@ jobs:
           fi
 
           if [ ! -s work/queue.txt ]; then
-            echo "Khong co video moi can boc (moi video trong in/ da co ket qua trong output/)."
+            echo "Khong co video moi can boc."
             exit 0
           fi
           echo "Danh sach se boc:"; cat work/queue.txt
@@ -201,12 +202,12 @@ jobs:
             cp "out/$NAME.srtpx" "output/$NAME.srtpx"
           done
 
-      # ---------- GOOGLE DRIVE: DAY KET QUA LEN srtpx/out ----------
-      - name: Day ket qua len Drive (srtpx/out)
+      # ---------- GOOGLE DRIVE: DAY KET QUA LEN srtpx/in (CANH VIDEO) ----------
+      - name: Day ket qua len Drive (srtpx/in, canh video)
         if: always() && steps.drive.outputs.enabled == 'true' && steps.drive.outputs.go == 'true'
         run: |
           if ls out/*.srtpx > /dev/null 2>&1; then
-            rclone copy out "$REMOTE:srtpx/out" --include "*.srtpx" -v
+            rclone copy out "$REMOTE:srtpx/in" --include "*.srtpx" -v
           else
             echo "Khong co file .srtpx moi de day len Drive."
           fi
@@ -229,5 +230,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
+          name: ketqua-srtpx
+          path: out/
           name: ketqua-srtpx
           path: out/

@@ -3,12 +3,15 @@ name: Boc hardsub
 on:
   workflow_dispatch:
     inputs:
+      drive_link:
+        description: "Link Google Drive cua video (Chia se: Bat ky ai co link deu xem duoc)"
+        required: false
       video_path:
-        description: "Duong dan video trong repo (vd input/video.mp4). Bo qua neu dung link"
+        description: "Hoac duong dan video trong repo (vd input/video.mp4)"
         default: "input/video.mp4"
         required: false
       video_url:
-        description: "Hoac link tai video truc tiep (neu dien thi dung cai nay)"
+        description: "Hoac link tai video truc tiep khac"
         required: false
       fps:
         description: "So khung hinh/giay quet (nho = nhanh)"
@@ -37,7 +40,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libgl1 libglib2.0-0
 
       - name: Cai thu vien Python
-        run: pip install -r requirements-ci.txt
+        run: pip install -r requirements-ci.txt gdown
 
       - name: Nho model OCR (do tai lai moi lan)
         uses: actions/cache@v4
@@ -47,11 +50,14 @@ jobs:
 
       - name: Lay video
         env:
+          DRIVE_LINK: ${{ inputs.drive_link }}
           VIDEO_URL: ${{ inputs.video_url }}
           VIDEO_PATH: ${{ inputs.video_path }}
         run: |
           mkdir -p work
-          if [ -n "$VIDEO_URL" ]; then
+          if [ -n "$DRIVE_LINK" ]; then
+            gdown --fuzzy "$DRIVE_LINK" -O work/video.mp4
+          elif [ -n "$VIDEO_URL" ]; then
             curl -L --fail -o work/video.mp4 "$VIDEO_URL"
           else
             cp "$VIDEO_PATH" work/video.mp4

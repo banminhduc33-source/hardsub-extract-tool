@@ -34,5 +34,6 @@ DAY CODE LEN GIT (cho nguoi phat trien):
 CHAY TREN MAY AO CUA GITHUB (GitHub Actions):
   1. Day repo len GitHub (Day_Len_Git.bat).
   2. Vao repo tren web -> tab "Actions" -> "Boc hardsub" -> "Run workflow".
-  3. Dien link video truc tiep (hoac de video trong thu muc input/ roi ghi duong dan).
+  3. Dan link Google Drive cua video vao o drive_link (Drive: Chia se -> "Bat ky ai co duong lien ket").
+     (Hoac dung video_url / video_path nhu cu.)
   4. Cho chay xong -> mo lan chay do -> muc "Artifacts" -> tai "ketqua-srtpx" (co file .srtpx).

@@ -120,7 +120,7 @@ jobs:
             SIZE=$(stat -c %s "$SRC")
             echo "Dung luong: $SIZE byte"
             echo "16 byte dau (hex): $(head -c 16 "$SRC" | xxd -p)"
-            if ! ffprobe -nostdin -v error -show_entries format=duration,size -of default=nw=1 "$SRC" 2> work/ffprobe_err.txt; then
+            if ! ffprobe -v error -show_entries format=duration,size -of default=nw=1 "$SRC" < /dev/null 2> work/ffprobe_err.txt; then
               echo "::error::ffprobe khong doc duoc $SRC. Loi that su:"
               cat work/ffprobe_err.txt
               echo "Neu dung luong rat nho so voi file tren Drive => tai thieu/bi chan. Neu dung luong dung ma van loi => video goc bi hong (chua ghi xong)."

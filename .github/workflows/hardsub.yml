@@ -48,7 +48,7 @@ jobs:
           cache-dependency-path: requirements-ci.txt
 
       - name: Cai thu vien he thong
-        run: sudo apt-get update && sudo apt-get install -y libgl1 libglib2.0-0
+        run: sudo apt-get update && sudo apt-get install -y libgl1 libglib2.0-0 ffmpeg file
 
       - name: Cai thu vien Python
         run: pip install -r requirements-ci.txt gdown
@@ -73,11 +73,12 @@ jobs:
 
           # ---- 1. Lap danh sach video can bóc ----
           if [ -n "$DRIVE_LINK" ]; then
-            gdown --fuzzy "$DRIVE_LINK" -O work/link_video.mp4 || true
-            if [ ! -s work/link_video.mp4 ] || head -c 2000 work/link_video.mp4 | grep -qi "<html"; then
-              echo "gdown khong tai duoc, thu cach 2..."
-              ID=$(echo "$DRIVE_LINK" | grep -oE '[-A-Za-z0-9_]{25,}' | head -1)
-              curl -L --fail -o work/link_video.mp4 "https://drive.usercontent.google.com/download?id=${ID}&export=download&confirm=t"
+            ID=$(echo "$DRIVE_LINK" | grep -oE '[-A-Za-z0-9_]{25,}' | head -1)
+            echo "Drive file ID: $ID"
+            gdown "$ID" -O work/link_video.mp4 || echo "gdown khong tai duoc, thu cach 2..."
+            MIME=$(file -b --mime-type work/link_video.mp4 2>/dev/null || echo none)
+            if [ ! -s work/link_video.mp4 ] || [ "${MIME%%/*}" = "text" ]; then
+              curl -L --fail -o work/link_video.mp4 "https://drive.usercontent.google.com/download?id=${ID}&export=download&confirm=t" || true
             fi
             echo "work/link_video.mp4|ketqua" >> work/queue.txt
           elif [ -n "$VIDEO_URL" ]; then
@@ -107,10 +108,15 @@ jobs:
             echo "=============== $SRC ==============="
             if [ ! -f "$SRC" ]; then echo "::error::Khong thay file $SRC"; exit 1; fi
             ls -l "$SRC"
-            if head -c 2000 "$SRC" | grep -qi "<html"; then
-              echo "::error::$SRC la TRANG WEB chu khong phai video (Drive chua chia se 'Bat ky ai co link', het luot tai, hoac link thu muc)."
-              exit 1
-            fi
+            MIME=$(file -b --mime-type "$SRC")
+            echo "Loai file: $MIME"
+            case "$MIME" in
+              text/*|application/json|application/xml)
+                echo "::error::$SRC KHONG phai video ma la '$MIME' (thuong la trang loi cua Drive: link chua chia se 'Bat ky ai co link', link thu muc/sai, hoac het luot tai)."
+                echo "Tieu de trang: $(grep -oi '<title>[^<]*' "$SRC" | head -1)"
+                echo "--- 600 byte dau ---"; head -c 600 "$SRC"; echo
+                exit 1 ;;
+            esac
             if ! ffprobe -nostdin -v error -show_entries format=duration,size -of default=nw=1 "$SRC"; then
               echo "::error::$SRC bi hong/tai thieu (moov atom not found)."
               exit 1

@@ -141,7 +141,7 @@ jobs:
           FPS: ${{ inputs.fps || '10' }}
           ROI: ${{ inputs.roi || '0,0,1.0,1.0' }}
           LANG_CODE: ${{ inputs.lang || 'ch' }}
-          TRANSLATE: ${{ inputs.translate == false && 'false' || 'true' }}
+          TRANSLATE: ${{ github.event_name == 'workflow_dispatch' && inputs.translate == false && 'false' || 'true' }}
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
         run: |

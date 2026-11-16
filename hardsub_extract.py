@@ -114,7 +114,13 @@ class OcrEngine:
 
         if engine == "paddleocr":
             from paddleocr import PaddleOCR  # lazy import
-            self._backend = PaddleOCR(use_angle_cls=True, lang=lang, show_log=False)
+            # CPU cua runner GitHub co the thieu tap lenh (AVX/oneDNN) ma cac pass
+            # toi uu cua Paddle Inference dung -> SIGILL (exit 132) trong
+            # SelfAttentionFusePass. Tat ir_optim + mkldnn de chay an toan.
+            self._backend = PaddleOCR(
+                use_angle_cls=True, lang=lang, show_log=False,
+                use_gpu=False, enable_mkldnn=False, ir_optim=False,
+            )
         elif engine == "easyocr":
             import easyocr  # lazy import
             langs = [lang] if isinstance(lang, str) else lang

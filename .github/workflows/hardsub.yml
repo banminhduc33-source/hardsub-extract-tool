@@ -152,6 +152,9 @@ jobs:
           # Tong thoi gian toi da de thu dich lai cho MOI video (phut) va thoi gian toi da moi lan thu (phut)
           TRANSLATE_MAX_MIN: "150"
           TRANSLATE_ATTEMPT_MIN: "30"
+          # Tranh SIGILL cua Paddle tren CPU runner (khong co oneDNN/AVX day du)
+          FLAGS_use_mkldnn: "0"
+          OMP_NUM_THREADS: "2"
         run: |
           mkdir -p work out output in
           : > work/queue.txt

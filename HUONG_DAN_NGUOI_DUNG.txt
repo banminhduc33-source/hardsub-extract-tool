@@ -32,7 +32,7 @@ DAY CODE LEN GIT (cho nguoi phat trien):
   Muon dung repo co san: dan link vao dong $RemoteUrl trong ci\day_len_git.ps1.
 
 CHAY TREN MAY AO CUA GITHUB (GitHub Actions):
-  CACH TU DONG: day video vao thu muc input/ cua repo (Add file -> Upload files,
+  CACH TU DONG: day video vao thu muc in/ cua repo (Add file -> Upload files,
   hoac git push). GitHub tu chay, boc xong luu file .srtpx vao thu muc output/
   (cung ten video) va dong thoi co o muc Artifacts cua lan chay. Video nao da co
   ket qua trong output/ thi khong boc lai.

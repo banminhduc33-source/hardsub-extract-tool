@@ -1,10 +1,10 @@
 name: Boc hardsub
 
 on:
-  # Tu chay khi co video moi duoc day vao thu muc input/
+  # Tu chay khi co video moi duoc day vao thu muc in/
   push:
     paths:
-      - "input/**"
+      - "in/**"
   # Hoac bam chay tay o tab Actions
   workflow_dispatch:
     inputs:
@@ -15,7 +15,7 @@ on:
         description: "Hoac link tai video truc tiep khac"
         required: false
       video_path:
-        description: "De trong = lay cac video trong input/ chua co ket qua (hoac ghi vd input/tap1.mp4)"
+        description: "De trong = lay cac video trong in/ chua co ket qua (hoac ghi vd in/tap1.mp4)"
         default: ""
       fps:
         description: "So khung hinh/giay quet (nho = nhanh)"
@@ -68,7 +68,7 @@ jobs:
           ROI: ${{ inputs.roi || '0,0,1.0,1.0' }}
           LANG_CODE: ${{ inputs.lang || 'ch' }}
         run: |
-          mkdir -p work out output input
+          mkdir -p work out output in
           : > work/queue.txt
 
           # ---- 1. Lap danh sach video can bóc ----
@@ -87,15 +87,15 @@ jobs:
             f="$VIDEO_PATH"; n=$(basename "${f%.*}")
             echo "$f|$n" >> work/queue.txt
           else
-            # Tu dong: moi video trong input/ ma chua co output/<ten>.srtpx
+            # Tu dong: moi video trong in/ ma chua co output/<ten>.srtpx
             while IFS= read -r f; do
               n=$(basename "${f%.*}")
               if [ ! -f "output/$n.srtpx" ]; then echo "$f|$n" >> work/queue.txt; fi
-            done < <(find input -maxdepth 1 -type f \( -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.webm' -o -iname '*.flv' -o -iname '*.ts' \) | sort)
+            done < <(find in -maxdepth 1 -type f \( -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.webm' -o -iname '*.flv' -o -iname '*.ts' \) | sort)
           fi
 
           if [ ! -s work/queue.txt ]; then
-            echo "Khong co video moi can boc (moi video trong input/ da co ket qua trong output/)."
+            echo "Khong co video moi can boc (moi video trong in/ da co ket qua trong output/)."
             exit 0
           fi
           echo "Danh sach se boc:"; cat work/queue.txt

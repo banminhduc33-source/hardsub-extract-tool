@@ -117,8 +117,13 @@ jobs:
                 echo "--- 600 byte dau ---"; head -c 600 "$SRC"; echo
                 exit 1 ;;
             esac
-            if ! ffprobe -nostdin -v error -show_entries format=duration,size -of default=nw=1 "$SRC"; then
-              echo "::error::$SRC bi hong/tai thieu (moov atom not found)."
+            SIZE=$(stat -c %s "$SRC")
+            echo "Dung luong: $SIZE byte"
+            echo "16 byte dau (hex): $(head -c 16 "$SRC" | xxd -p)"
+            if ! ffprobe -nostdin -v error -show_entries format=duration,size -of default=nw=1 "$SRC" 2> work/ffprobe_err.txt; then
+              echo "::error::ffprobe khong doc duoc $SRC. Loi that su:"
+              cat work/ffprobe_err.txt
+              echo "Neu dung luong rat nho so voi file tren Drive => tai thieu/bi chan. Neu dung luong dung ma van loi => video goc bi hong (chua ghi xong)."
               exit 1
             fi
             python hardsub_extract.py "$SRC" -o "out/$NAME.srtpx" \

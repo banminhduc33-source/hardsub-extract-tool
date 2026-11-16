@@ -11,6 +11,7 @@ from tkinter import filedialog, messagebox, ttk
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, "hardsub_extract.py")
+TRANSLATE_SCRIPT = os.path.join(HERE, "translate_srtpx.py")
 
 ROI_PRESETS = {
     "Toàn bộ khung hình (mặc định, chậm hơn)": "0,0,1.0,1.0",
@@ -63,6 +64,7 @@ class App(tk.Tk):
         self.roi = tk.StringVar(value=list(ROI_PRESETS)[0])
         self.fps = tk.StringVar(value="15")
         self.debug = tk.BooleanVar(value=True)
+        self.translate = tk.BooleanVar(value=False)
 
         rows = [
             ("Công cụ đọc chữ:", ttk.Combobox(opt, textvariable=self.engine, values=list(ENGINES), state="readonly", width=44)),
@@ -75,6 +77,8 @@ class App(tk.Tk):
             w.grid(row=i, column=1, sticky="w", padx=8)
         ttk.Checkbutton(opt, text="Lưu ảnh kiểm tra (có kẻ khung đỏ quanh chữ) vào thư mục 'debug' cạnh file kết quả",
                         variable=self.debug).grid(row=len(rows), column=0, columnspan=2, sticky="w", padx=8, pady=4)
+        ttk.Checkbutton(opt, text="Dịch sang tiếng Việt sau khi bóc (cần file keys.txt cạnh chương trình, mỗi dòng 1 API key Gemini)",
+                        variable=self.translate).grid(row=len(rows) + 1, column=0, columnspan=2, sticky="w", padx=8, pady=4)
 
         # Buttons
         bar = ttk.Frame(self)
@@ -144,6 +148,15 @@ class App(tk.Tk):
         if self.debug.get():
             cmd += ["--debug-dir", os.path.join(os.path.dirname(out) or ".", "debug"), "--debug-every", "20"]
 
+        self.translate_cmd = None
+        if self.translate.get():
+            if not os.path.isfile(os.path.join(HERE, "keys.txt")) and not (
+                    os.environ.get("GEMINI_API_KEYS") or os.environ.get("GEMINI_API_KEY")):
+                messagebox.showwarning("Thiếu API key", "Chưa có file keys.txt (mỗi dòng 1 key Gemini) cạnh chương trình.")
+                return
+            self.translate_cmd = [sys.executable, "-u", TRANSLATE_SCRIPT, out,
+                                  "--keep-original", os.path.splitext(out)[0] + ".zh.srtpx"]
+
         self.say("\n=== Bắt đầu (lần đầu có thể mất vài phút để tải model OCR) ===\n")
         self.btn_run.configure(state="disabled")
         self.btn_stop.configure(state="normal")
@@ -160,7 +173,19 @@ class App(tk.Tk):
         for line in self.proc.stdout:
             self.q.put(line)
         self.proc.wait()
-        self.q.put(("DONE", self.proc.returncode))
+        code = self.proc.returncode
+        if code == 0 and self.translate_cmd:
+            self.q.put("\n=== Đang dịch sang tiếng Việt ===\n")
+            env = dict(os.environ, PYTHONIOENCODING="utf-8")
+            flags = subprocess.CREATE_NO_WINDOW if sys.platform.startswith("win") else 0
+            self.proc = subprocess.Popen(self.translate_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                         text=True, encoding="utf-8", errors="replace",
+                                         env=env, creationflags=flags)
+            for line in self.proc.stdout:
+                self.q.put(line)
+            self.proc.wait()
+            code = self.proc.returncode
+        self.q.put(("DONE", code))
 
     def poll(self):
         try:

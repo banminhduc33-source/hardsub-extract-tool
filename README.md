@@ -53,3 +53,11 @@ Fps càng cao thì mốc thời gian càng sát (30fps khớp mẫu nhất) như
 | `--stable-sec` | Khung giữ yên ít nhất số giây này mới là khung ổn định chính (mặc định 0.5) |
 | `--min-frames` / `--max-gap-frames` | Lọc nhiễu / chịu được OCR chớp tắt |
 | `--scale` | Phóng to vùng quét trước khi OCR (chữ nhỏ → tăng lên) |
+
+## Dịch sang tiếng Việt (Gemini)
+
+`translate_srtpx.py` dịch phần chữ Hán trong file `.srtpx` sang tiếng Việt, giữ nguyên thời gian, `Độ rộng`, `Vị trí`, `KF`.
+
+- **GitHub Actions**: vào Settings → Secrets and variables → Actions → New repository secret, tên `GEMINI_API_KEYS`, giá trị là các API key, **mỗi dòng một key**. Có secret này thì workflow tự dịch sau khi bóc (tắt bằng ô `translate` khi chạy tay). Bản tiếng Trung được giữ ở `output/<tên>.zh.srtpx`. Đổi model: tạo Variable `GEMINI_MODEL` (mặc định `gemini-2.5-flash`).
+- **Trên máy**: tạo file `keys.txt` cạnh script (mỗi dòng một key, file này đã được git bỏ qua), rồi chạy `python translate_srtpx.py video.srtpx -o video_vi.srtpx --keep-original video.zh.srtpx`, hoặc tích ô "Dịch sang tiếng Việt" trong giao diện.
+- Key hết quota thì tự đổi sang key kế tiếp; key bị từ chối thì bị loại.

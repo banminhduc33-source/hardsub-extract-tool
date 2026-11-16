@@ -4,3 +4,4 @@ __pycache__/
 debug/
 *.srtpx
 !demo/test_output.srtpx
+!output/*.srtpx

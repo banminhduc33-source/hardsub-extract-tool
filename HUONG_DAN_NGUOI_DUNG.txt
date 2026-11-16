@@ -32,8 +32,8 @@ DAY CODE LEN GIT (cho nguoi phat trien):
   Muon dung repo co san: dan link vao dong $RemoteUrl trong ci\day_len_git.ps1.
 
 CHAY TREN MAY AO CUA GITHUB (GitHub Actions):
-  1. Day repo len GitHub (Day_Len_Git.bat).
-  2. Vao repo tren web -> tab "Actions" -> "Boc hardsub" -> "Run workflow".
-  3. Dan link Google Drive cua video vao o drive_link (Drive: Chia se -> "Bat ky ai co duong lien ket").
-     (Hoac dung video_url / video_path nhu cu.)
-  4. Cho chay xong -> mo lan chay do -> muc "Artifacts" -> tai "ketqua-srtpx" (co file .srtpx).
+  CACH TU DONG: day video vao thu muc input/ cua repo (Add file -> Upload files,
+  hoac git push). GitHub tu chay, boc xong luu file .srtpx vao thu muc output/
+  (cung ten video) va dong thoi co o muc Artifacts cua lan chay. Video nao da co
+  ket qua trong output/ thi khong boc lai.
+  CACH TAY: tab Actions -> "Boc hardsub" -> Run workflow, dan drive_link / video_url.

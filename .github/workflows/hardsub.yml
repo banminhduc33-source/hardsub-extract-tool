@@ -1,18 +1,22 @@
 name: Boc hardsub
 
 on:
+  # Tu chay khi co video moi duoc day vao thu muc input/
+  push:
+    paths:
+      - "input/**"
+  # Hoac bam chay tay o tab Actions
   workflow_dispatch:
     inputs:
       drive_link:
         description: "Link Google Drive cua video (Chia se: Bat ky ai co link deu xem duoc)"
         required: false
-      video_path:
-        description: "De trong = tu lay video dau tien trong thu muc input/ (hoac ghi duong dan, vd input/tap1.mp4)"
-        default: ""
-        required: false
       video_url:
         description: "Hoac link tai video truc tiep khac"
         required: false
+      video_path:
+        description: "De trong = lay cac video trong input/ chua co ket qua (hoac ghi vd input/tap1.mp4)"
+        default: ""
       fps:
         description: "So khung hinh/giay quet (nho = nhanh)"
         default: "10"
@@ -22,6 +26,13 @@ on:
       lang:
         description: "ch = gian the, chinese_cht = phon the"
         default: "ch"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hardsub
+  cancel-in-progress: false
 
 jobs:
   extract:
@@ -48,63 +59,86 @@ jobs:
           path: ~/.paddleocr
           key: paddleocr-models-v1
 
-      - name: Lay video
+      - name: Boc hardsub
         env:
           DRIVE_LINK: ${{ inputs.drive_link }}
           VIDEO_URL: ${{ inputs.video_url }}
           VIDEO_PATH: ${{ inputs.video_path }}
+          FPS: ${{ inputs.fps || '10' }}
+          ROI: ${{ inputs.roi || '0,0,1.0,1.0' }}
+          LANG_CODE: ${{ inputs.lang || 'ch' }}
         run: |
-          mkdir -p work
+          mkdir -p work out output input
+          : > work/queue.txt
+
+          # ---- 1. Lap danh sach video can bóc ----
           if [ -n "$DRIVE_LINK" ]; then
-            gdown --fuzzy "$DRIVE_LINK" -O work/video.mp4 || true
-            if [ ! -s work/video.mp4 ] || head -c 2000 work/video.mp4 | grep -qi "<html"; then
+            gdown --fuzzy "$DRIVE_LINK" -O work/link_video.mp4 || true
+            if [ ! -s work/link_video.mp4 ] || head -c 2000 work/link_video.mp4 | grep -qi "<html"; then
               echo "gdown khong tai duoc, thu cach 2..."
               ID=$(echo "$DRIVE_LINK" | grep -oE '[-A-Za-z0-9_]{25,}' | head -1)
-              curl -L --fail -o work/video.mp4 "https://drive.usercontent.google.com/download?id=${ID}&export=download&confirm=t"
+              curl -L --fail -o work/link_video.mp4 "https://drive.usercontent.google.com/download?id=${ID}&export=download&confirm=t"
             fi
+            echo "work/link_video.mp4|ketqua" >> work/queue.txt
           elif [ -n "$VIDEO_URL" ]; then
-            curl -L --fail -o work/video.mp4 "$VIDEO_URL"
+            curl -L --fail -o work/link_video.mp4 "$VIDEO_URL"
+            echo "work/link_video.mp4|ketqua" >> work/queue.txt
+          elif [ -n "$VIDEO_PATH" ]; then
+            f="$VIDEO_PATH"; n=$(basename "${f%.*}")
+            echo "$f|$n" >> work/queue.txt
           else
-            if [ -z "$VIDEO_PATH" ]; then
-              VIDEO_PATH=$(find input -maxdepth 1 -type f \( -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.webm' -o -iname '*.flv' -o -iname '*.ts' \) | sort | head -1)
-            fi
-            if [ -z "$VIDEO_PATH" ] || [ ! -f "$VIDEO_PATH" ]; then
-              echo "::error::Khong thay video. Bo video vao thu muc input/ hoac dien drive_link / video_url."
+            # Tu dong: moi video trong input/ ma chua co output/<ten>.srtpx
+            while IFS= read -r f; do
+              n=$(basename "${f%.*}")
+              if [ ! -f "output/$n.srtpx" ]; then echo "$f|$n" >> work/queue.txt; fi
+            done < <(find input -maxdepth 1 -type f \( -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.webm' -o -iname '*.flv' -o -iname '*.ts' \) | sort)
+          fi
+
+          if [ ! -s work/queue.txt ]; then
+            echo "Khong co video moi can boc (moi video trong input/ da co ket qua trong output/)."
+            exit 0
+          fi
+          echo "Danh sach se boc:"; cat work/queue.txt
+
+          # ---- 2. Kiem tra + boc tung video ----
+          mapfile -t QUEUE < work/queue.txt
+          for line in "${QUEUE[@]}"; do
+            SRC="${line%%|*}"; NAME="${line#*|}"
+            echo "=============== $SRC ==============="
+            if [ ! -f "$SRC" ]; then echo "::error::Khong thay file $SRC"; exit 1; fi
+            ls -l "$SRC"
+            if head -c 2000 "$SRC" | grep -qi "<html"; then
+              echo "::error::$SRC la TRANG WEB chu khong phai video (Drive chua chia se 'Bat ky ai co link', het luot tai, hoac link thu muc)."
               exit 1
             fi
-            echo "Dung video: $VIDEO_PATH"
-            cp "$VIDEO_PATH" work/video.mp4
-          fi
+            if ! ffprobe -nostdin -v error -show_entries format=duration,size -of default=nw=1 "$SRC"; then
+              echo "::error::$SRC bi hong/tai thieu (moov atom not found)."
+              exit 1
+            fi
+            python hardsub_extract.py "$SRC" -o "out/$NAME.srtpx" \
+              --engine paddleocr --lang "$LANG_CODE" --fps "$FPS" --roi "$ROI" \
+              --debug-dir "out/debug_$NAME" --debug-every 50 < /dev/null
+            cp "out/$NAME.srtpx" "output/$NAME.srtpx"
+          done
 
-      - name: Kiem tra video
+      - name: Luu ket qua vao thu muc output/ cua repo
+        if: always()
         run: |
-          ls -l work/video.mp4
-          file work/video.mp4
-          if head -c 2000 work/video.mp4 | grep -qi "<html"; then
-            echo "::error::Drive tra ve TRANG WEB chu khong phai video (chua chia se 'Bat ky ai co link', het luot tai, hoac link thu muc)."
-            head -c 400 work/video.mp4
-            exit 1
-          fi
-          if ! ffprobe -v error -show_entries format=duration,size -of default=nw=1 work/video.mp4; then
-            echo "::error::File video bi hong/tai thieu (moov atom not found). Kiem tra dung luong file tren o tren voi dung luong Drive; hoac video goc chua ghi xong."
-            exit 1
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add output
+          if git diff --cached --quiet; then
+            echo "Khong co ket qua moi de luu."
+          else
+            git commit -m "Ket qua boc hardsub"
+            git pull --rebase
+            git push
           fi
 
-      - name: Boc hardsub
-        env:
-          FPS: ${{ inputs.fps }}
-          ROI: ${{ inputs.roi }}
-          LANG_CODE: ${{ inputs.lang }}
-        run: |
-          mkdir -p out
-          python hardsub_extract.py work/video.mp4 -o out/ketqua.srtpx \
-            --engine paddleocr --lang "$LANG_CODE" --fps "$FPS" --roi "$ROI" \
-            --debug-dir out/debug --debug-every 50
-
-      - name: Tai ket qua ve
+      - name: Tai ket qua ve (artifact)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ketqua-srtpx
           path: out/
-          if-no-files-found: warn
+          if-no-files-found: ignore

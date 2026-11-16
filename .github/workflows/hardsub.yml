@@ -29,6 +29,10 @@ on:
       lang:
         description: "ch = gian the, chinese_cht = phon the"
         default: "ch"
+      translate:
+        description: "Dich sang tieng Viet bang Gemini (can secret GEMINI_API_KEYS)"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -137,6 +141,9 @@ jobs:
           FPS: ${{ inputs.fps || '10' }}
           ROI: ${{ inputs.roi || '0,0,1.0,1.0' }}
           LANG_CODE: ${{ inputs.lang || 'ch' }}
+          TRANSLATE: ${{ inputs.translate == false && 'false' || 'true' }}
+          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
         run: |
           mkdir -p work out output in
           : > work/queue.txt
@@ -199,6 +206,19 @@ jobs:
             python hardsub_extract.py "$SRC" -o "out/$NAME.srtpx" \
               --engine paddleocr --lang "$LANG_CODE" --fps "$FPS" --roi "$ROI" \
               --debug-dir "out/debug_$NAME" --debug-every 50 < /dev/null
+            # ---- Dich Trung -> Viet (neu co secret GEMINI_API_KEYS) ----
+            if [ "$TRANSLATE" = "true" ] && [ -n "${GEMINI_API_KEYS:-}" ]; then
+              cp "out/$NAME.srtpx" "output/$NAME.zh.srtpx"   # giu ban tieng Trung
+              if timeout 120m python translate_srtpx.py "out/$NAME.srtpx" \
+                   ${GEMINI_MODEL:+--model "$GEMINI_MODEL"} < /dev/null; then
+                echo "Da dich xong: $NAME"
+              else
+                echo "::warning::Dich that bai, giu ban tieng Trung cho $NAME"
+                rm -f "output/$NAME.zh.srtpx"
+              fi
+            else
+              echo "Bo qua dich (tat hoac chua co secret GEMINI_API_KEYS)."
+            fi
             cp "out/$NAME.srtpx" "output/$NAME.srtpx"
           done
 

@@ -33,6 +33,9 @@ on:
         description: "Dich sang tieng Viet bang Gemini (can secret GEMINI_API_KEYS)"
         type: boolean
         default: true
+      model:
+        description: "Model Gemini dung de dich"
+        default: "gemini-4-hydrogen"
 
 permissions:
   contents: write
@@ -80,6 +83,7 @@ jobs:
 
           if [ "$ENABLED" = "true" ]; then
             # Ket qua nam canh video trong srtpx/in -> coi nhu da xu ly
+            # (chi tinh file <ten>.srtpx; file <ten>.zh.srtpx = ban tieng Trung chua dich -> van se thu lai)
             rclone lsf --ignore-case "$REMOTE:srtpx/in" --include "*.srtpx" > work/drive_done.txt 2>/dev/null || true
             # Bo qua file vua sua duoi 2 phut (tranh file dang tai len do)
             rclone lsf --ignore-case "$REMOTE:srtpx/in" --min-age 2m \
@@ -143,10 +147,67 @@ jobs:
           LANG_CODE: ${{ inputs.lang || 'ch' }}
           TRANSLATE: ${{ github.event_name == 'workflow_dispatch' && inputs.translate == false && 'false' || 'true' }}
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
-          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          # Mac dinh gemini-4-hydrogen (bo qua bien repo GEMINI_MODEL cu de khoi dinh nham model da ngung)
+          GEMINI_MODEL: ${{ inputs.model || 'gemini-4-hydrogen' }}
+          # Tong thoi gian toi da de thu dich lai cho MOI video (phut) va thoi gian toi da moi lan thu (phut)
+          TRANSLATE_MAX_MIN: "150"
+          TRANSLATE_ATTEMPT_MIN: "30"
         run: |
           mkdir -p work out output in
           : > work/queue.txt
+          FAILED_TRANSLATE=0
+
+          # ---------- Ham tro giup: dem chu Han trong file ----------
+          han_count() {
+            python - "$1" <<'PY'
+          import re, sys
+          t = open(sys.argv[1], encoding="utf-8", errors="ignore").read()
+          print(len(re.findall(r"[\u3400-\u4dbf\u4e00-\u9fff]", t)))
+          PY
+          }
+
+          # ---------- Ham dich co thu lai ----------
+          # Thu den khi: script dich thanh cong VA con <=10% chu Han (tuc la that su da dich).
+          # Loi API / 429 / timeout / dich do -> khoi phuc ban Trung roi thu lai, nghi tang dan.
+          # Dung khi het TRANSLATE_MAX_MIN phut.
+          translate_with_retry() {
+            local name="$1"
+            local zh="work/$name.zh.srtpx"
+            local target="out/$name.srtpx"
+            local zh_han left n=0 wait_s now deadline
+            zh_han=$(han_count "$zh")
+            if [ "$zh_han" -eq 0 ]; then
+              echo "Khong co chu Han de dich trong $name."
+              cp "$zh" "$target"
+              return 0
+            fi
+            deadline=$(( $(date +%s) + TRANSLATE_MAX_MIN * 60 ))
+            while :; do
+              n=$((n+1))
+              cp "$zh" "$target"   # luon dich tu ban Trung nguyen ven
+              echo ">>> Dich lan $n: $name | model=$GEMINI_MODEL | chu Han goc=$zh_han"
+              if timeout "${TRANSLATE_ATTEMPT_MIN}m" python translate_srtpx.py "$target" \
+                   --model "$GEMINI_MODEL" < /dev/null; then
+                left=$(han_count "$target")
+                if [ $((left * 100)) -le $((zh_han * 10)) ]; then
+                  echo "Da dich xong: $name (lan $n, con $left/$zh_han chu Han)"
+                  return 0
+                fi
+                echo "::warning::Lan $n: script bao xong nhung con $left/$zh_han chu Han -> thu lai"
+              else
+                echo "::warning::Lan $n: loi/timeout khi goi Gemini -> thu lai"
+              fi
+              wait_s=$(( n * 20 )); [ "$wait_s" -gt 300 ] && wait_s=300
+              now=$(date +%s)
+              if [ $((now + wait_s)) -ge "$deadline" ]; then
+                echo "::error::Het $TRANSLATE_MAX_MIN phut thu dich lai cho $name (da thu $n lan)."
+                cp "$zh" "$target"
+                return 1
+              fi
+              echo "Cho ${wait_s}s roi thu lai..."
+              sleep "$wait_s"
+            done
+          }
 
           # ---- 1. Lap danh sach video can boc ----
           if [ -n "$DRIVE_LINK" ]; then
@@ -206,21 +267,31 @@ jobs:
             python hardsub_extract.py "$SRC" -o "out/$NAME.srtpx" \
               --engine paddleocr --lang "$LANG_CODE" --fps "$FPS" --roi "$ROI" \
               --debug-dir "out/debug_$NAME" --debug-every 50 < /dev/null
-            # ---- Dich Trung -> Viet (neu co secret GEMINI_API_KEYS) ----
+
+            # ---- Dich Trung -> Viet bang Gemini (thu lai den khi duoc) ----
             if [ "$TRANSLATE" = "true" ] && [ -n "${GEMINI_API_KEYS:-}" ]; then
-              cp "out/$NAME.srtpx" "output/$NAME.zh.srtpx"   # giu ban tieng Trung
-              if timeout 120m python translate_srtpx.py "out/$NAME.srtpx" \
-                   ${GEMINI_MODEL:+--model "$GEMINI_MODEL"} < /dev/null; then
-                echo "Da dich xong: $NAME"
+              cp "out/$NAME.srtpx" "work/$NAME.zh.srtpx"      # ban Trung nguyen ven de thu lai
+              if translate_with_retry "$NAME"; then
+                cp "work/$NAME.zh.srtpx" "output/$NAME.zh.srtpx"   # giu ban tieng Trung
+                cp "out/$NAME.srtpx" "output/$NAME.srtpx"          # ban Viet = ket qua chinh
               else
-                echo "::warning::Dich that bai, giu ban tieng Trung cho $NAME"
-                rm -f "output/$NAME.zh.srtpx"
+                # Dich that bai het han: luu ban Trung duoi ten .zh.srtpx (KHONG danh dau la xong)
+                # -> lan chay sau (lich moi gio / chay tay) se tu thu lai cho video nay.
+                FAILED_TRANSLATE=1
+                cp "work/$NAME.zh.srtpx" "out/$NAME.zh.srtpx"
+                cp "work/$NAME.zh.srtpx" "output/$NAME.zh.srtpx"
+                rm -f "out/$NAME.srtpx" "output/$NAME.srtpx"
               fi
             else
               echo "Bo qua dich (tat hoac chua co secret GEMINI_API_KEYS)."
+              cp "out/$NAME.srtpx" "output/$NAME.srtpx"
             fi
-            cp "out/$NAME.srtpx" "output/$NAME.srtpx"
           done
+
+          if [ "$FAILED_TRANSLATE" -eq 1 ]; then
+            echo "::error::Co video chua dich duoc. Ban tieng Trung da luu (.zh.srtpx); lan chay sau se thu lai."
+            exit 1
+          fi
 
       # ---------- GOOGLE DRIVE: DAY KET QUA LEN srtpx/in (CANH VIDEO) ----------
       - name: Day ket qua len Drive (srtpx/in, canh video)

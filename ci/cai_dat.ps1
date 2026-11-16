@@ -1,4 +1,4 @@
-\xef\xbb\xbf# Cai dat mot phat: Python (neu thieu) + thu vien + tao shortcut ngoai Desktop
+﻿# Cai dat mot phat: Python (neu thieu) + thu vien + tao shortcut ngoai Desktop
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $Root = Split-Path -Parent $PSScriptRoot

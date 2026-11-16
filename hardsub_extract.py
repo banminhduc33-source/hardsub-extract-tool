@@ -252,7 +252,8 @@ def build_blocks(boxes, cjk_only=True):
             text=_join_text(g),
             bbox=(min(b["x_min"] for b in g), max(b["x_max"] for b in g),
                   min(b["y_min"] for b in g), max(b["y_max"] for b in g)),
-            conf=statistics.mean(b["conf"] for b in g)))
+            conf=statistics.mean(b["conf"] for b in g),
+            row_h=statistics.median(b["y_max"] - b["y_min"] for b in g)))
     blocks.sort(key=lambda b: (b["bbox"][2], b["bbox"][0]))
     return blocks
 
@@ -295,6 +296,7 @@ class Track:
     def __init__(self, t, block):
         self.frames = [(t, block["bbox"])]
         self.texts = [block["text"]]          # text OCR doc duoc o tung khung (song song voi frames)
+        self.row_hs = [block.get("row_h", block["bbox"][3] - block["bbox"][2])]  # chieu cao 1 dong chu
         self.score = collections.defaultdict(float)
         self.score[block["text"]] += block["conf"]
         self.last_t = t
@@ -302,6 +304,7 @@ class Track:
     def add(self, t, block):
         self.frames.append((t, block["bbox"]))
         self.texts.append(block["text"])
+        self.row_hs.append(block.get("row_h", block["bbox"][3] - block["bbox"][2]))
         self.score[block["text"]] += block["conf"]
         self.last_t = t
 
@@ -312,11 +315,16 @@ class Track:
     def text(self):
         return max(self.score, key=lambda k: (self.score[k], len(k)))
 
+    def row_h(self):
+        """Chieu cao 1 dong chu (trung vi), dung lam don vi de dem vien cho hop."""
+        return statistics.median(self.row_hs)
+
     def absorb(self, other):
         pairs = sorted(list(zip(self.frames, self.texts)) + list(zip(other.frames, other.texts)),
                        key=lambda p: p[0][0])
         self.frames = [p[0] for p in pairs]
         self.texts = [p[1] for p in pairs]
+        self.row_hs = sorted(self.row_hs + other.row_hs)
         for k, v in other.score.items():
             self.score[k] += v
         self.last_t = max(self.last_t, other.last_t)
@@ -436,13 +444,15 @@ def classify_motion(tr, step_sec, move_tol=10.0, med_win=5, min_move_sec=0.1):
     return False, list(zip(ts, boxes)), ref, f"tinh: lech lon nhat {best} khung (< {need}) hoac chi 1 mep"
 
 
-def summarize(tr, step_sec, kf_tol=6.0, stable_sec=0.5, med_win=5, min_move_sec=0.1, move_tol=10.0):
+def summarize(tr, step_sec, kf_tol=6.0, stable_sec=0.5, med_win=5, min_move_sec=0.1, move_tol=10.0,
+              end_t=None):
     """Tra ve (main_box, kf_list). kf_list rong neu khung chu khong chuyen dong that."""
     is_dyn, frames, ref, _ = classify_motion(tr, step_sec, move_tol, med_win, min_move_sec)
     if not is_dyn:
         return ref, []                       # tinh: chi 1 khung, khong KF
 
-    end_t = tr.last_t + step_sec
+    if end_t is None:
+        end_t = tr.last_t + step_sec
     kfs = [frames[0]]
     for t, b in frames[1:]:
         if _boxdiff(b, kfs[-1][1]) > kf_tol:
@@ -478,16 +488,69 @@ def _i(v):
     return int(round(v))
 
 
+def pad_box(box, row_h, pad_ratio, width, height, min_px=2.0):
+    """No hop ra de che het vien chu (net vien/bong/mep mo cua chu cung ma OCR khong do duoc).
+
+    Dem = max(min_px, pad_ratio * chieu cao 1 dong chu) moi phia, roi kep trong khung hinh.
+    pad_ratio <= 0 -> giu nguyen hop OCR."""
+    if pad_ratio <= 0:
+        return tuple(box)
+    p = max(min_px, pad_ratio * row_h)
+    x1, x2, y1, y2 = box
+    return (max(0.0, x1 - p), min(float(width), x2 + p),
+            max(0.0, y1 - p), min(float(height), y2 + p))
+
+
+def join_ends(tracks, step_sec, join_gap):
+    """Noi DUOI cau truoc voi DAU cau sau neu 2 cau cach nhau <= join_gap giay (khong chong nhau).
+
+    Chi noi 2 cau cung "lan" (khung chu chong nhau theo chieu doc >= 50% chieu cao khung thap hon),
+    de cau o cho khac (bang to, chu phu...) hien cung luc khong bi keo dai nham.
+    tracks phai da sap theo thoi gian bat dau. Tra ve list end_t (giay) song song voi tracks."""
+    ends = [tr.last_t + step_sec for tr in tracks]
+    if join_gap <= 0:
+        return ends
+    eps = 1e-6
+    ybox = []
+    for tr in tracks:
+        box = _median_box([b for _, b in tr.frames])
+        ybox.append((box[2], box[3]))
+
+    def same_lane(i, j):
+        top = max(ybox[i][0], ybox[j][0])
+        bot = min(ybox[i][1], ybox[j][1])
+        h = max(1.0, min(ybox[i][1] - ybox[i][0], ybox[j][1] - ybox[j][0]))
+        return bot - top >= 0.5 * h
+
+    n = len(tracks)
+    for i in range(n):
+        best = None
+        for j in range(n):
+            if j == i:
+                continue
+            gap = tracks[j].start - ends[i]
+            if -eps <= gap <= join_gap + eps and same_lane(i, j):
+                if best is None or tracks[j].start < tracks[best].start:
+                    best = j
+        if best is not None:
+            ends[i] = max(ends[i], tracks[best].start)
+    return ends
+
+
 def format_srtpx(tracks, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, med_win=5,
-                 min_move_sec=0.1, report=False, move_tol=10.0):
+                 min_move_sec=0.1, report=False, move_tol=10.0, pad_ratio=0.0, join_gap=0.0):
     tracks = sorted(tracks, key=lambda tr: (tr.start, tr.frames[0][1][2]))
+    ends = join_ends(tracks, step_sec, join_gap)
     entries = []
     for n, tr in enumerate(tracks, start=1):
-        main, kfs = summarize(tr, step_sec, kf_tol, stable_sec, med_win, min_move_sec, move_tol)
+        end_t = ends[n - 1]
+        main, kfs = summarize(tr, step_sec, kf_tol, stable_sec, med_win, min_move_sec, move_tol, end_t=end_t)
         if report:
             print(f"#{n:>3} {tr.text()[:12]:<12} -> {classify_motion(tr, step_sec, move_tol, med_win, min_move_sec)[3]}",
                   file=sys.stderr)
-        end_t = tr.last_t + step_sec
+        rh = tr.row_h()
+        main = pad_box(main, rh, pad_ratio, width, height)
+        kfs = [(t, pad_box(b, rh, pad_ratio, width, height)) for t, b in kfs]
         lines = [
             str(n),
             f"{seconds_to_srt_ts(tr.start)} --> {seconds_to_srt_ts(end_t)}",
@@ -502,9 +565,9 @@ def format_srtpx(tracks, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, me
 
 
 def write_srtpx(tracks, out_path, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, med_win=5,
-                min_move_sec=0.1, report=False, move_tol=10.0):
+                min_move_sec=0.1, report=False, move_tol=10.0, pad_ratio=0.0, join_gap=0.0):
     content = format_srtpx(tracks, width, height, step_sec, kf_tol, stable_sec, med_win, min_move_sec,
-                           report, move_tol)
+                           report, move_tol, pad_ratio, join_gap)
     with open(out_path, "wb") as f:   # ghi nhi phan de giu dung CRLF tren moi he dieu hanh
         f.write(content.encode("utf-8"))
 
@@ -566,6 +629,10 @@ def main():
                     help="In ra stderr từng câu được xếp là tĩnh/động và lý do")
     ap.add_argument("--stable-sec", type=float, default=0.5,
                     help="Khung giữ yên ít nhất số giây này mới coi là khung ổn định chính")
+    ap.add_argument("--pad", type=float, default=0.25,
+                    help="No hop den ra moi phia = so nay x chieu cao 1 dong chu (che het vien chu), 0 = tat")
+    ap.add_argument("--join-gap", type=float, default=0.3,
+                    help="2 cau lien tiep cach nhau <= so giay nay thi noi duoi cau truoc vao dau cau sau, 0 = tat")
     ap.add_argument("--debug-dir", default=None, help="Thư mục lưu ảnh debug đã kẻ khung")
     ap.add_argument("--debug-every", type=int, default=15, help="Lưu debug mỗi N frame đã xử lý")
     args = ap.parse_args()
@@ -605,7 +672,8 @@ def main():
                           max_gap_frames=args.max_gap_frames, min_frames=args.min_frames,
                           merge_sim=args.merge_sim)
     write_srtpx(tracks, args.output, w, h, step_sec, args.kf_tol, args.stable_sec,
-                args.med_win, args.min_move_sec, args.report, args.move_tol)
+                args.med_win, args.min_move_sec, args.report, args.move_tol,
+                args.pad, args.join_gap)
     print(f"Xong: {len(tracks)} câu phụ đề -> {args.output}")
 
 

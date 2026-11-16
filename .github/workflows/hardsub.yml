@@ -56,13 +56,31 @@ jobs:
         run: |
           mkdir -p work
           if [ -n "$DRIVE_LINK" ]; then
-            gdown --fuzzy "$DRIVE_LINK" -O work/video.mp4
+            gdown --fuzzy "$DRIVE_LINK" -O work/video.mp4 || true
+            if [ ! -s work/video.mp4 ] || head -c 2000 work/video.mp4 | grep -qi "<html"; then
+              echo "gdown khong tai duoc, thu cach 2..."
+              ID=$(echo "$DRIVE_LINK" | grep -oE '[-A-Za-z0-9_]{25,}' | head -1)
+              curl -L --fail -o work/video.mp4 "https://drive.usercontent.google.com/download?id=${ID}&export=download&confirm=t"
+            fi
           elif [ -n "$VIDEO_URL" ]; then
             curl -L --fail -o work/video.mp4 "$VIDEO_URL"
           else
             cp "$VIDEO_PATH" work/video.mp4
           fi
-          ls -lh work/video.mp4
+
+      - name: Kiem tra video
+        run: |
+          ls -l work/video.mp4
+          file work/video.mp4
+          if head -c 2000 work/video.mp4 | grep -qi "<html"; then
+            echo "::error::Drive tra ve TRANG WEB chu khong phai video (chua chia se 'Bat ky ai co link', het luot tai, hoac link thu muc)."
+            head -c 400 work/video.mp4
+            exit 1
+          fi
+          if ! ffprobe -v error -show_entries format=duration,size -of default=nw=1 work/video.mp4; then
+            echo "::error::File video bi hong/tai thieu (moov atom not found). Kiem tra dung luong file tren o tren voi dung luong Drive; hoac video goc chua ghi xong."
+            exit 1
+          fi
 
       - name: Boc hardsub
         env:

@@ -288,12 +288,14 @@ def _near(a, b):
 class Track:
     def __init__(self, t, block):
         self.frames = [(t, block["bbox"])]
+        self.texts = [block["text"]]          # text OCR doc duoc o tung khung (song song voi frames)
         self.score = collections.defaultdict(float)
         self.score[block["text"]] += block["conf"]
         self.last_t = t
 
     def add(self, t, block):
         self.frames.append((t, block["bbox"]))
+        self.texts.append(block["text"])
         self.score[block["text"]] += block["conf"]
         self.last_t = t
 
@@ -305,7 +307,10 @@ class Track:
         return max(self.score, key=lambda k: (self.score[k], len(k)))
 
     def absorb(self, other):
-        self.frames = sorted(self.frames + other.frames, key=lambda f: f[0])
+        pairs = sorted(list(zip(self.frames, self.texts)) + list(zip(other.frames, other.texts)),
+                       key=lambda p: p[0][0])
+        self.frames = [p[0] for p in pairs]
+        self.texts = [p[1] for p in pairs]
         for k, v in other.score.items():
             self.score[k] += v
         self.last_t = max(self.last_t, other.last_t)
@@ -366,20 +371,78 @@ def build_tracks(samples, step_sec, similarity=0.6, max_gap_frames=2,
 # 4) KHUNG CHU: on dinh hay chuyen dong (KF)
 # --------------------------------------------------------------------------
 
-def summarize(tr, step_sec, kf_tol=6.0, stable_sec=0.5):
-    """Tra ve (main_box, kf_list). kf_list rong neu khung chu khong chuyen dong."""
-    frames = tr.frames
-    end_t = tr.last_t + step_sec
+def _despike(vals, k, tol):
+    """Xoa gai: khung nao lech > tol so voi trung vi cua so k thi thay bang trung vi.
+    Doan chuyen dong lien tuc (don dieu) khong bi dong vao vi trung vi = chinh no.
+    Khung dau/cuoi giu nguyen (khong du lang gieng de ket luan)."""
+    n = len(vals)
+    out = list(vals)
+    if k <= 1 or n < 3:
+        return out
+    r = k // 2
+    for i in range(1, n - 1):
+        m = statistics.median(vals[max(0, i - r): i + r + 1])
+        if abs(vals[i] - m) > tol:
+            out[i] = m
+    return out
 
+
+def _geometry_frames(tr, min_text_sim=0.8):
+    """Chi tin khung hinh cua cac khung OCR doc ra DUNG noi dung cau (cung do dai, giong >= 0.8).
+    Khung doc thieu/thua chu hoac dinh chu la o ben canh se lam khung chu rong ra/hep lai
+    mot ky tu (~45px) -> khong phai chuyen dong. Neu loc xong con qua it thi dung het."""
+    best = tr.text()
+    keep = [f for f, tx in zip(tr.frames, tr.texts)
+            if len(tx) == len(best) and similar(tx, best) >= min_text_sim]
+    return keep if len(keep) >= max(2, int(0.4 * len(tr.frames))) else list(tr.frames)
+
+
+def classify_motion(tr, step_sec, move_tol=10.0, med_win=5, min_move_sec=0.1):
+    """Phan loai 1 cau: tra ve (is_dynamic, frames_da_loc, box_on_dinh, ly_do).
+
+    Chuyen dong THAT = ca 2 mep cua khung cung lech khoi vi tri on dinh (tinh tien: 2 mep cung
+    huong; phong/thu: 2 mep nguoc huong) VA keo dai >= min_move_sec.
+    Khong tinh la chuyen dong:
+      - nhay dot bien 1-2 khung roi ve cho cu       (loc trung vi)
+      - chi 1 mep lech (x2 vot ra/x1 vot vao)        (OCR thua/thieu chu hoac dinh chu ben canh)
+      - lech nho <= tol (rung do OCR)                (tol = max(move_tol, 0.15 * chieu cao chu))
+    """
+    geo = _geometry_frames(tr)
+    ts = [t for t, _ in geo]
+    ref = _median_box([b for _, b in geo])
+    tol = max(move_tol, 0.15 * (ref[3] - ref[2]))
+    cols = [_despike([b[i] for _, b in geo], med_win, tol) for i in range(4)]
+    boxes = list(zip(*cols))
+    ref = _median_box(boxes)
+    need = max(2, round(min_move_sec / step_sec))
+
+    def moving(b):
+        two_x = abs(b[0] - ref[0]) > tol and abs(b[1] - ref[1]) > tol
+        two_y = abs(b[2] - ref[2]) > tol and abs(b[3] - ref[3]) > tol
+        return two_x or two_y
+
+    run = best = 0
+    for b in boxes:
+        run = run + 1 if moving(b) else 0
+        best = max(best, run)
+    if best >= need:
+        return True, list(zip(ts, boxes)), ref, f"dong: {best} khung lien tiep lech > {tol:.0f}px"
+    return False, list(zip(ts, boxes)), ref, f"tinh: lech lon nhat {best} khung (< {need}) hoac chi 1 mep"
+
+
+def summarize(tr, step_sec, kf_tol=6.0, stable_sec=0.5, med_win=5, min_move_sec=0.1, move_tol=10.0):
+    """Tra ve (main_box, kf_list). kf_list rong neu khung chu khong chuyen dong that."""
+    is_dyn, frames, ref, _ = classify_motion(tr, step_sec, move_tol, med_win, min_move_sec)
+    if not is_dyn:
+        return ref, []                       # tinh: chi 1 khung, khong KF
+
+    end_t = tr.last_t + step_sec
     kfs = [frames[0]]
     for t, b in frames[1:]:
         if _boxdiff(b, kfs[-1][1]) > kf_tol:
             kfs.append((t, b))
 
-    if len(kfs) == 1:  # dung yen
-        return _median_box([b for _, b in frames]), []
-
-    # Co chuyen dong: KF cuoi dat tai luc ket thuc cau, voi khung o khung hinh cuoi
+    # KF cuoi dat tai luc ket thuc cau, voi khung o khung hinh cuoi
     if end_t - kfs[-1][0] > 1.5 * step_sec:
         kfs.append((end_t, frames[-1][1]))
     else:
@@ -409,11 +472,15 @@ def _i(v):
     return int(round(v))
 
 
-def format_srtpx(tracks, width, height, step_sec, kf_tol=6.0, stable_sec=0.5):
+def format_srtpx(tracks, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, med_win=5,
+                 min_move_sec=0.1, report=False, move_tol=10.0):
     tracks = sorted(tracks, key=lambda tr: (tr.start, tr.frames[0][1][2]))
     entries = []
     for n, tr in enumerate(tracks, start=1):
-        main, kfs = summarize(tr, step_sec, kf_tol, stable_sec)
+        main, kfs = summarize(tr, step_sec, kf_tol, stable_sec, med_win, min_move_sec, move_tol)
+        if report:
+            print(f"#{n:>3} {tr.text()[:12]:<12} -> {classify_motion(tr, step_sec, move_tol, med_win, min_move_sec)[3]}",
+                  file=sys.stderr)
         end_t = tr.last_t + step_sec
         lines = [
             str(n),
@@ -428,8 +495,10 @@ def format_srtpx(tracks, width, height, step_sec, kf_tol=6.0, stable_sec=0.5):
     return f"#res {width}x{height}\r\n\r\n" + "\r\n\r\n".join(entries)
 
 
-def write_srtpx(tracks, out_path, width, height, step_sec, kf_tol=6.0, stable_sec=0.5):
-    content = format_srtpx(tracks, width, height, step_sec, kf_tol, stable_sec)
+def write_srtpx(tracks, out_path, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, med_win=5,
+                min_move_sec=0.1, report=False, move_tol=10.0):
+    content = format_srtpx(tracks, width, height, step_sec, kf_tol, stable_sec, med_win, min_move_sec,
+                           report, move_tol)
     with open(out_path, "wb") as f:   # ghi nhi phan de giu dung CRLF tren moi he dieu hanh
         f.write(content.encode("utf-8"))
 
@@ -480,7 +549,15 @@ def main():
                     help="Số khung OCR trống liên tiếp tối đa vẫn coi là cùng 1 câu")
     ap.add_argument("--min-frames", type=int, default=2, help="Số khung tối thiểu để 1 câu được tính")
     ap.add_argument("--kf-tol", type=float, default=6.0,
-                    help="Khung chữ lệch quá số pixel này thì tính là chuyển động (ghi dòng KF)")
+                    help="Câu ĐÃ là động: khung lệch quá số pixel này thì thêm 1 dòng KF")
+    ap.add_argument("--move-tol", type=float, default=10.0,
+                    help="Quyết định tĩnh/động: cả 2 mép khung phải lệch quá số px này (và >=15%% chiều cao chữ)")
+    ap.add_argument("--med-win", type=int, default=5,
+                    help="Cửa sổ lọc trung vị (khung) để xoá nhiễu đột biến 1-2 khung; 1 = tắt")
+    ap.add_argument("--min-move-sec", type=float, default=0.1,
+                    help="Chuyển động phải kéo dài ít nhất số giây này mới tính là động")
+    ap.add_argument("--report", action="store_true",
+                    help="In ra stderr từng câu được xếp là tĩnh/động và lý do")
     ap.add_argument("--stable-sec", type=float, default=0.5,
                     help="Khung giữ yên ít nhất số giây này mới coi là khung ổn định chính")
     ap.add_argument("--debug-dir", default=None, help="Thư mục lưu ảnh debug đã kẻ khung")
@@ -521,7 +598,8 @@ def main():
     tracks = build_tracks(samples, step_sec, similarity=args.similarity,
                           max_gap_frames=args.max_gap_frames, min_frames=args.min_frames,
                           merge_sim=args.merge_sim)
-    write_srtpx(tracks, args.output, w, h, step_sec, args.kf_tol, args.stable_sec)
+    write_srtpx(tracks, args.output, w, h, step_sec, args.kf_tol, args.stable_sec,
+                args.med_win, args.min_move_sec, args.report, args.move_tol)
     print(f"Xong: {len(tracks)} câu phụ đề -> {args.output}")
 
 

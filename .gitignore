@@ -3,5 +3,5 @@ __pycache__/
 *.pyc
 debug/
 *.srtpx
-!demo/test_output.srtpx
+!demo/*.srtpx
 !output/*.srtpx

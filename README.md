@@ -1,90 +1,55 @@
 # Tool bóc hardsub tiếng Trung → file .srtpx
 
-## Nguyên lý hoạt động
+## Định dạng .srtpx (theo file mẫu `demo/testvn.srtpx`)
 
-1. **Tách khung hình** theo FPS mục tiêu (mặc định 30fps) — không xuất hàng
-   nghìn file ảnh ra đĩa cho tốn chỗ, mà đọc trực tiếp từng frame bằng OpenCV
-   và chỉ OCR đúng những frame rơi vào bước lấy mẫu, nhưng mốc thời gian vẫn
-   tính theo FPS **gốc** của video nên timestamp luôn chính xác.
-2. **Quét từng khung hình** trong vùng ROI (vùng chứa phụ đề, mặc định toàn bộ
-   khung hình) bằng OCR để tìm **chữ nằm ở đâu** (bounding box
-   pixel) và **nội dung chữ là gì**.
-3. **Ghép các frame liên tiếp có cùng nội dung** (so sánh bằng tỉ lệ giống
-   nhau, chịu được sai số OCR vài ký tự) thành từng "câu" phụ đề, xác định
-   mốc `start/end` giống hệt file SRT.
-4. **So khung chữ lúc câu vừa xuất hiện với lúc câu đã "chốt"** (vài frame
-   đầu vs vài frame cuối của câu đó). Nếu lệch nhau quá ngưỡng (mặc định
-   6px) → ghi **cả 2 khung** theo đúng format mẫu
-   (`Độ rộng: a - b (cuối câu: c - d)`); nếu không đổi → chỉ ghi 1 khung.
-5. **Ghi ra file `.srtpx`** đúng cấu trúc: số thứ tự, mốc thời gian kiểu SRT,
-   nội dung chữ Trung, dòng `Độ rộng` (khoảng x) và dòng `Vị trí` (khoảng y).
-6. **(Tuỳ chọn) Xuất ảnh debug**: mỗi N frame xử lý sẽ lưu lại ảnh gốc có
-   **kẻ khung** — khung xanh = vùng ROI đang quét, khung đỏ = chữ OCR tìm
-   thấy — để bạn kiểm tra bằng mắt xem ROI/OCR có đang bắt đúng chỗ không,
-   trước khi chạy full video.
-
-> Lưu ý quan trọng: cách chia "khung chính / cuối câu" ở trên là một **suy
-> luận hợp lý dựa trên 1 file mẫu** bạn đưa, không phải tài liệu chính thức
-> của công cụ gốc tạo ra file đó. Vài tham số (ngưỡng lệch pixel, số frame
-> đầu/cuối lấy mẫu, ngưỡng giống nhau giữa 2 câu...) có thể cần chỉnh lại
-> cho khớp 100% với video thật của bạn — xem mục "Các tham số hay chỉnh".
-
-## Cài đặt
-
-```bash
-pip install opencv-python-headless numpy pillow
-
-# chọn 1 trong 3 OCR engine:
-pip install paddleocr paddlepaddle        # khuyên dùng — chính xác nhất cho chữ Hán
-# hoặc
-pip install easyocr                        # dễ cài hơn, chậm hơn chút
-# hoặc dùng tesseract có sẵn + cài gói tiếng Trung của hệ điều hành:
-sudo apt install tesseract-ocr-chi-sim tesseract-ocr-chi-tra
 ```
+#res 768x576                      ← độ phân giải video
+                                  
+1
+00:00:00,267 --> 00:00:09,467     ← bắt đầu → kết thúc (kết thúc = lúc câu biến mất)
+Nội dung chữ
+Độ rộng: 252px - 520px            ← khung chữ ổn định (x1 - x2)
+Vị trí: 46px - 80px               ← (y1 - y2)
+KF 0.27s: 217 555 -21 18          ← chỉ có khi khung chữ chuyển động (hiệu ứng)
+KF 1.00s: 252 520 46 80              mỗi dòng = "thời gian: x1 x2 y1 y2"
+KF 9.47s: 252 520 46 80
+```
+Xuống dòng kiểu CRLF, UTF-8 không BOM. Chạy `python demo/test_format.py` để kiểm tra
+bộ ghi file tạo ra **giống từng byte** file mẫu.
 
-Máy chạy công cụ này (sandbox trò chuyện) **không có kết nối mạng** nên
-không tự tải được model OCR tiếng Trung / gói ngôn ngữ tiếng Trung để chạy
-thử trực tiếp ở đây. Script đã được kiểm thử đầy đủ logic (tách frame, OCR,
-ghép câu, tính khung toạ độ, xuất file, xuất ảnh debug) bằng một video giả
-lập chữ Latin + tesseract tiếng Anh (xem thư mục `demo/`) — phần OCR tiếng
-Trung sẽ hoạt động y hệt về mặt pipeline, bạn chỉ cần cài engine + chạy ở
-máy có mạng.
+## Nguyên lý
+
+1. Đọc video, lấy mẫu khung hình theo `--fps`.
+2. OCR trong vùng `--roi` (mặc định toàn khung hình) để tìm chữ nằm ở đâu và là chữ gì.
+3. Gom các ô chữ gần nhau thành một khối (một câu). Mặc định **bỏ chữ không phải chữ Hán**
+   (số, logo...) để không bị dính vào khung. Nhiều câu ở nhiều vị trí khác nhau được theo dõi riêng.
+4. Theo dõi từng khối qua các khung hình; các mảnh bị đứt do OCR đọc lệch/hiệu ứng xuất hiện được nối lại.
+5. Khung chữ đứng yên → chỉ ghi `Độ rộng`/`Vị trí`. Khung chữ chuyển động → ghi thêm các dòng `KF`.
+6. (Tuỳ chọn) xuất ảnh debug có kẻ khung đỏ quanh chữ tìm được.
+
+> Cách chia khung chính / KF là suy luận từ file mẫu, không phải tài liệu chính thức. Hiệu ứng
+> trượt vào từ ngoài khung (toạ độ âm như `-21` trong mẫu) OCR không đo được vì chữ chưa nằm trong
+> khung hình, nên các KF đầu của loại hiệu ứng đó có thể khác mẫu.
 
 ## Cách chạy
 
 ```bash
-python3 hardsub_extract.py video.mp4 -o ketqua.srtpx \
-    --engine paddleocr --lang ch \
-    --fps 30 \
-    --roi 0,0.75,1.0,1.0 \
+python3 hardsub_extract.py video.mp4 -o ketqua.srtpx --engine paddleocr --lang ch --fps 30 \
     --debug-dir debug_frames --debug-every 20
 ```
+Fps càng cao thì mốc thời gian càng sát (30fps khớp mẫu nhất) nhưng chạy càng lâu.
 
-Sau khi chạy xong, **mở vài ảnh trong `debug_frames/` trước** để xác nhận
-khung đỏ đang bám đúng chữ phụ đề rồi mới tin vào số liệu trong file
-`.srtpx`.
+## Tham số hay chỉnh
 
-## Các tham số hay chỉnh
-
-| Tham số | Ý nghĩa | Khi nào cần đổi |
-|---|---|---|
-| `--roi x1,y1,x2,y2` | Vùng chứa phụ đề, tính theo phân số 0..1 của khung hình | Muốn chạy nhanh hơn → thu nhỏ ROI, vd `0,0.75,1.0,1.0` (25% dưới cùng) |
-| `--fps` | Số frame lấy mẫu mỗi giây | Video dài → giảm xuống (vd 10-15) để chạy nhanh hơn, đổi lại mốc thời gian kém mịn hơn chút |
-| `--engine` / `--lang` | Engine OCR dùng và mã ngôn ngữ | `paddleocr`/`easyocr` dùng `ch`; `tesseract` dùng `chi_sim` (giản thể) hoặc `chi_tra` (phồn thể) |
-| `--scale` | Phóng to vùng ROI trước khi OCR | Chữ nhỏ/video độ phân giải thấp → tăng lên 2.5-3.0 |
-| `--similarity` | Ngưỡng % giống nhau giữa 2 frame để coi là cùng 1 câu | OCR hay đọc lệch vài ký tự giữa các frame → giảm ngưỡng (vd 0.6) |
-| `--max-gap-frames` | Số frame OCR "trống" liên tiếp vẫn coi là chưa hết câu | Chữ hay bị chớp/mất nét giữa chừng → tăng lên |
-| `--min-frames` | Số frame tối thiểu để tính là 1 câu thật | OCR hay bắt nhầm chữ nền/nhiễu trong 1-2 frame → tăng lên để lọc nhiễu |
-
-## Cấu trúc thư mục bàn giao
-
-```
-hardsub_extract.py     # tool chính
-requirements.txt       # danh sách thư viện cần cài
-README.md              # tài liệu này
-demo/                  # bằng chứng đã chạy thử pipeline thành công
-  make_test_video.py     # script tạo video giả lập để test
-  test_input.mp4
-  test_output.srtpx      # kết quả chạy thử (khớp đúng format mẫu)
-  debug_frames/          # vài ảnh đã kẻ khung minh hoạ bước 6
-```
+| Tham số | Ý nghĩa |
+|---|---|
+| `--roi x1,y1,x2,y2` | Vùng quét (phân số 0..1). Mặc định toàn khung hình; thu nhỏ (vd `0,0.75,1,1`) để chạy nhanh hơn |
+| `--fps` | Số khung quét mỗi giây |
+| `--engine` / `--lang` | `paddleocr`: `ch`/`chinese_cht`; `easyocr`: `ch_sim`/`ch_tra`; `tesseract`: `chi_sim`/`chi_tra` |
+| `--keep-non-cjk` | Giữ cả chữ không phải chữ Hán (mặc định bỏ) |
+| `--similarity` | Ngưỡng giống nhau để coi 2 khung là cùng một câu (mặc định 0.6) |
+| `--merge-sim` | Ngưỡng nối các mảnh câu bị đứt (mặc định 0.5) |
+| `--kf-tol` | Khung lệch quá số pixel này thì tính là chuyển động (mặc định 6) |
+| `--stable-sec` | Khung giữ yên ít nhất số giây này mới là khung ổn định chính (mặc định 0.5) |
+| `--min-frames` / `--max-gap-frames` | Lọc nhiễu / chịu được OCR chớp tắt |
+| `--scale` | Phóng to vùng quét trước khi OCR (chữ nhỏ → tăng lên) |

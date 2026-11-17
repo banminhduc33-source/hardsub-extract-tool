@@ -38,6 +38,7 @@ VI DU:
 """
 
 import argparse
+import math
 import collections
 import difflib
 import os
@@ -149,7 +150,8 @@ class OcrEngine:
             xs = [p[0] for p in box]
             ys = [p[1] for p in box]
             out.append(dict(text=text.strip(), x_min=min(xs), x_max=max(xs),
-                             y_min=min(ys), y_max=max(ys), conf=conf))
+                             y_min=min(ys), y_max=max(ys), conf=conf,
+                             poly=[(float(q[0]), float(q[1])) for q in box]))
         return out
 
     def _detect_easyocr(self, img_bgr):
@@ -160,7 +162,8 @@ class OcrEngine:
             xs = [p[0] for p in box]
             ys = [p[1] for p in box]
             out.append(dict(text=text.strip(), x_min=min(xs), x_max=max(xs),
-                             y_min=min(ys), y_max=max(ys), conf=conf))
+                             y_min=min(ys), y_max=max(ys), conf=conf,
+                             poly=[(float(q[0]), float(q[1])) for q in box]))
         return out
 
     def _detect_tesseract(self, img_bgr):
@@ -275,7 +278,8 @@ def build_blocks(boxes, cjk_only=True):
             bbox=(min(b["x_min"] for b in g), max(b["x_max"] for b in g),
                   min(b["y_min"] for b in g), max(b["y_max"] for b in g)),
             conf=statistics.mean(b["conf"] for b in g),
-            row_h=statistics.median(b["y_max"] - b["y_min"] for b in g)))
+            row_h=statistics.median(b["y_max"] - b["y_min"] for b in g),
+            polys=[b["poly"] for b in g] if all(b.get("poly") for b in g) else []))
     blocks.sort(key=lambda b: (b["bbox"][2], b["bbox"][0]))
     return blocks
 
@@ -298,9 +302,10 @@ def detect_frame_blocks(engine, roi_img, roi_offset, scale, cjk_only=True, min_h
         y_min, y_max = b["y_min"] / scale + oy, b["y_max"] / scale + oy
         if y_max - y_min < min_h:
             continue
+        poly = [(q[0] / scale + ox, q[1] / scale + oy) for q in b["poly"]] if b.get("poly") else None
         boxes.append(dict(text=b["text"], conf=b["conf"],
                           x_min=b["x_min"] / scale + ox, x_max=b["x_max"] / scale + ox,
-                          y_min=y_min, y_max=y_max))
+                          y_min=y_min, y_max=y_max, poly=poly))
     blocks = build_blocks(boxes, cjk_only)
     return [bl for bl in blocks if count_chars(bl["text"], cjk_only) >= min_chars]
 
@@ -333,6 +338,7 @@ class Track:
         self.frames = [(t, block["bbox"])]
         self.texts = [block["text"]]          # text OCR doc duoc o tung khung (song song voi frames)
         self.row_hs = [block.get("row_h", block["bbox"][3] - block["bbox"][2])]  # chieu cao 1 dong chu
+        self.polys = [block.get("polys", [])]  # cac goc da giac cua tung o chu o tung khung (cho chu nghieng)
         self.score = collections.defaultdict(float)
         self.score[block["text"]] += block["conf"]
         self.last_t = t
@@ -341,6 +347,7 @@ class Track:
         self.frames.append((t, block["bbox"]))
         self.texts.append(block["text"])
         self.row_hs.append(block.get("row_h", block["bbox"][3] - block["bbox"][2]))
+        self.polys.append(block.get("polys", []))
         self.score[block["text"]] += block["conf"]
         self.last_t = t
 
@@ -356,10 +363,11 @@ class Track:
         return statistics.median(self.row_hs)
 
     def absorb(self, other):
-        pairs = sorted(list(zip(self.frames, self.texts)) + list(zip(other.frames, other.texts)),
+        pairs = sorted(list(zip(self.frames, self.texts, self.polys)) + list(zip(other.frames, other.texts, other.polys)),
                        key=lambda p: p[0][0])
         self.frames = [p[0] for p in pairs]
         self.texts = [p[1] for p in pairs]
+        self.polys = [p[2] for p in pairs]
         self.row_hs = sorted(self.row_hs + other.row_hs)
         for k, v in other.score.items():
             self.score[k] += v
@@ -573,11 +581,69 @@ def join_ends(tracks, step_sec, join_gap):
     return ends
 
 
+def tilt_cover(poly, min_tilt_deg=4.0, tol=0.35, max_k=16, text_frac=0.7):
+    """Chu nghieng (dong chu la hinh binh hanh 4 goc): thay hop chu nhat to bang
+    - band: hop nam ngang giua dong (chua chu viet, cao bang be day chu, rong text_frac x chieu dai dong);
+    - covers: chuoi hop nho doc theo duong cheo (moi hop chi cheo them <= tol x be day chu), phu kin chu cu.
+    Tra ve (band, covers) hoac None neu chu khong nghieng/khong du dieu kien.  Hop = (x1, x2, y1, y2)."""
+    if not poly or len(poly) != 4:
+        return None
+    (x0, y0), (x1, y1), (x2, y2), (x3, y3) = poly
+    ax, ay = ((x1 - x0) + (x2 - x3)) / 2, ((y1 - y0) + (y2 - y3)) / 2     # huong dong chu (canh 0-1)
+    bx, by = ((x3 - x0) + (x2 - x1)) / 2, ((y3 - y0) + (y2 - y1)) / 2     # be day (canh 0-3)
+    L, t = math.hypot(ax, ay), math.hypot(bx, by)
+    if t < 1 or L < 2 * t:                                                  # chu doc/ngan: khong xu ly
+        return None
+    theta = math.degrees(math.atan2(ay, ax))
+    if theta > 90:
+        theta -= 180
+    elif theta < -90:
+        theta += 180
+    if abs(theta) < min_tilt_deg or abs(theta) > 45:
+        return None
+    sin_t, cos_t = abs(math.sin(math.radians(theta))), math.cos(math.radians(theta))
+    k = max(2, min(max_k, math.ceil(L * sin_t / (tol * t))))
+    covers = []
+    for i in range(k):
+        s0, s1 = i / k, (i + 1) / k
+        pts = [(x0 + s * ax + r * bx, y0 + s * ay + r * by) for s in (s0, s1) for r in (0.0, 1.0)]
+        xs, ys = [q[0] for q in pts], [q[1] for q in pts]
+        covers.append((min(xs), max(xs), min(ys), max(ys)))
+    cx, cy = x0 + (ax + bx) / 2, y0 + (ay + by) / 2
+    w, h = text_frac * L * cos_t, t / cos_t
+    band = (cx - w / 2, cx + w / 2, cy - h / 2, cy + h / 2)
+    return band, covers
+
+
+def _tilt_for_track(tr, main, tilt_deg):
+    """Chu nghieng dung yen (1 dong, co goc da giac) -> (band, covers); khong thi None."""
+    if tilt_deg <= 0 or not tr.polys:
+        return None
+    idx = min(range(len(tr.frames)), key=lambda i: _boxdiff(tr.frames[i][1], main))
+    polys = tr.polys[idx]
+    if len(polys) != 1:
+        return None
+    return tilt_cover(polys[0], min_tilt_deg=tilt_deg)
+
+
 def format_srtpx(tracks, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, med_win=5,
-                 min_move_sec=0.1, report=False, move_tol=10.0, pad_ratio=0.0, join_gap=0.0):
+                 min_move_sec=0.1, report=False, move_tol=10.0, pad_ratio=0.0, join_gap=0.0, tilt_deg=0.0):
     tracks = sorted(tracks, key=lambda tr: (tr.start, tr.frames[0][1][2]))
     ends = join_ends(tracks, step_sec, join_gap)
     entries = []
+
+    def entry(text, start, end, box, kfs=()):
+        lines = [
+            str(len(entries) + 1),
+            f"{seconds_to_srt_ts(start)} --> {seconds_to_srt_ts(end)}",
+            text,
+            f"Độ rộng: {_i(box[0])}px - {_i(box[1])}px",
+            f"Vị trí: {_i(box[2])}px - {_i(box[3])}px",
+        ]
+        for t, b in kfs:
+            lines.append(f"KF {t:.2f}s: {_i(b[0])} {_i(b[1])} {_i(b[2])} {_i(b[3])}")
+        entries.append("\r\n".join(lines))
+
     for n, tr in enumerate(tracks, start=1):
         end_t = ends[n - 1]
         main, kfs = summarize(tr, step_sec, kf_tol, stable_sec, med_win, min_move_sec, move_tol, end_t=end_t)
@@ -585,25 +651,25 @@ def format_srtpx(tracks, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, me
             print(f"#{n:>3} {tr.text()[:12]:<12} -> {classify_motion(tr, step_sec, move_tol, med_win, min_move_sec)[3]}",
                   file=sys.stderr)
         rh = tr.row_h()
+        tilt = None if kfs else _tilt_for_track(tr, main, tilt_deg)
+        if tilt:                                    # chu nghieng: hop chinh = dai ngang giua, them hop che doc duong cheo
+            band, covers = tilt
+            entry(tr.text(), tr.start, end_t, pad_box(band, rh, pad_ratio, width, height))
+            for cv in covers:                       # block khong co chu: chi ve hop den
+                entry("", tr.start, end_t, pad_box(cv, rh, pad_ratio, width, height))
+            if report:
+                print(f"      chu nghieng -> 1 hop chinh + {len(covers)} hop che", file=sys.stderr)
+            continue
         main = pad_box(main, rh, pad_ratio, width, height)
         kfs = [(t, pad_box(b, rh, pad_ratio, width, height)) for t, b in kfs]
-        lines = [
-            str(n),
-            f"{seconds_to_srt_ts(tr.start)} --> {seconds_to_srt_ts(end_t)}",
-            tr.text(),
-            f"Độ rộng: {_i(main[0])}px - {_i(main[1])}px",
-            f"Vị trí: {_i(main[2])}px - {_i(main[3])}px",
-        ]
-        for t, b in kfs:
-            lines.append(f"KF {t:.2f}s: {_i(b[0])} {_i(b[1])} {_i(b[2])} {_i(b[3])}")
-        entries.append("\r\n".join(lines))
+        entry(tr.text(), tr.start, end_t, main, kfs)
     return f"#res {width}x{height}\r\n\r\n" + "\r\n\r\n".join(entries)
 
 
 def write_srtpx(tracks, out_path, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, med_win=5,
-                min_move_sec=0.1, report=False, move_tol=10.0, pad_ratio=0.0, join_gap=0.0):
+                min_move_sec=0.1, report=False, move_tol=10.0, pad_ratio=0.0, join_gap=0.0, tilt_deg=0.0):
     content = format_srtpx(tracks, width, height, step_sec, kf_tol, stable_sec, med_win, min_move_sec,
-                           report, move_tol, pad_ratio, join_gap)
+                           report, move_tol, pad_ratio, join_gap, tilt_deg)
     with open(out_path, "wb") as f:   # ghi nhi phan de giu dung CRLF tren moi he dieu hanh
         f.write(content.encode("utf-8"))
 
@@ -674,6 +740,9 @@ def main():
                     help="No hop den ra moi phia = so nay x chieu cao 1 dong chu, toi thieu 2px (mac dinh 0.05: hop sat chu), 0 = tat")
     ap.add_argument("--join-gap", type=float, default=0.3,
                     help="2 cau lien tiep cach nhau <= so giay nay thi noi duoi cau truoc vao dau cau sau, 0 = tat")
+    ap.add_argument("--tilt", type=float, default=4.0,
+                    help="Chu nghieng tu so do nay tro len thi thay hop den to bang chuoi hop nho doc theo duong cheo "
+                         "(chi cho chu dung yen, can goc da giac cua OCR: paddleocr/easyocr), 0 = tat")
     ap.add_argument("--debug-dir", default=None, help="Thư mục lưu ảnh debug đã kẻ khung")
     ap.add_argument("--debug-every", type=int, default=15, help="Lưu debug mỗi N frame đã xử lý")
     args = ap.parse_args()
@@ -715,7 +784,7 @@ def main():
                           merge_sim=args.merge_sim)
     write_srtpx(tracks, args.output, w, h, step_sec, args.kf_tol, args.stable_sec,
                 args.med_win, args.min_move_sec, args.report, args.move_tol,
-                args.pad, args.join_gap)
+                args.pad, args.join_gap, args.tilt)
     print(f"Xong: {len(tracks)} câu phụ đề -> {args.output}")
 
 

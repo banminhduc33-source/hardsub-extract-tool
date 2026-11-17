@@ -54,9 +54,11 @@ Fps càng cao thì mốc thời gian càng sát (30fps khớp mẫu nhất) như
 | `--min-frames` / `--max-gap-frames` | Lọc nhiễu / chịu được OCR chớp tắt |
 | `--min-height` | Chỉ lấy chữ cao ít nhất tỉ lệ này so với chiều cao video (mặc định 0.035 = 3.5%), bỏ chữ li ti trong bảng/giao diện; `0` = tắt |
 | `--min-chars` | Khối chữ phải có ít nhất ngần này chữ mới lấy (mặc định 2) |
-| `--tilt` | Chữ nghiêng từ ngần này độ trở lên (mặc định 4, `0` = tắt) thì thay hộp đen to bằng 1 hộp chính (có chữ) + chuỗi hộp nhỏ không chữ chạy theo đường chéo. Chỉ cho chữ đứng yên và engine có góc đa giác (paddleocr/easyocr) |
+| `--tilt` | Chữ nghiêng từ ngần này độ trở lên (mặc định 4, `0` = tắt) thì thay hộp đen to bằng 1 hộp chính (có chữ) + chuỗi hộp nhỏ không chữ chạy theo đường chéo. Dùng được cả khi chữ **vừa nghiêng/xoay vừa chuyển động** (mỗi hộp có KF riêng) và khi chữ nghiêng tới 80°; cần engine có góc đa giác (paddleocr/easyocr) |
 | `--pad` | Nở hộp đen ra mỗi phía = số này × chiều cao 1 dòng chữ, để che hết viền/bóng chữ (mặc định 0.05, tối thiểu 2px: hộp sát chữ; `0` = tắt) |
 | `--join-gap` | 2 câu liên tiếp (cùng hàng) cách nhau ≤ số giây này thì nối đuôi câu trước vào đầu câu sau (mặc định 0.3, `0` = tắt) |
+| `--split-sim` | 2 đoạn chữ ổn định kề nhau trong cùng 1 câu mà giống nhau < số này (mặc định 0.85) thì **tách thành 2 câu** (trước đây câu liền kề giống ≥60% bị gộp thành 1). `0` = tắt |
+| `--min-run-sec` | Một nội dung phải ổn định ít nhất số giây này mới tính là 1 câu riêng khi tách (mặc định 0.3) |
 | `--scale` | Phóng to vùng quét trước khi OCR (chữ nhỏ → tăng lên) |
 
 ## Dịch sang tiếng Việt (Gemini)
@@ -66,3 +68,7 @@ Fps càng cao thì mốc thời gian càng sát (30fps khớp mẫu nhất) như
 - **GitHub Actions**: vào Settings → Secrets and variables → Actions → New repository secret, tên `GEMINI_API_KEYS`, giá trị là các API key, **mỗi dòng một key**. Có secret này thì workflow tự dịch sau khi bóc (tắt bằng ô `translate` khi chạy tay). Bản tiếng Trung được giữ ở `output/<tên>.zh.srtpx`. Đổi model: tạo Variable `GEMINI_MODEL` (mặc định `gemini-2.5-flash`).
 - **Trên máy**: tạo file `keys.txt` cạnh script (mỗi dòng một key, file này đã được git bỏ qua), rồi chạy `python translate_srtpx.py video.srtpx -o video_vi.srtpx --keep-original video.zh.srtpx`, hoặc tích ô "Dịch sang tiếng Việt" trong giao diện.
 - Key hết quota thì tự đổi sang key kế tiếp; key bị từ chối thì bị loại.
+
+## Kiểm tra
+
+`python demo/test_regress.py` (gộp câu, chữ dọc, hộp chéo cho chữ xoay/nghiêng) và các `demo/test_*.py` khác.

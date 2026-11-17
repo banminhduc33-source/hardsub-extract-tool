@@ -202,7 +202,17 @@ def _is_cjk(s):
 
 
 def _join_text(group):
-    """Noi chu cua 1 khoi: theo hang (tren->duoi), trong hang (trai->phai)."""
+    """Noi chu cua 1 khoi: theo hang (tren->duoi), trong hang (trai->phai).
+    Khoi chu doc: theo cot (phai->trai), trong cot (tren->duoi)."""
+    if all(_is_vertical(b) for b in group):
+        cols = []
+        for b in sorted(group, key=lambda b: -(b["x_min"] + b["x_max"]) / 2):
+            cx, w = (b["x_min"] + b["x_max"]) / 2, b["x_max"] - b["x_min"]
+            if cols and abs(cx - cols[-1]["cx"]) <= 0.6 * max(w, cols[-1]["w"]):
+                cols[-1]["items"].append(b)
+            else:
+                cols.append(dict(cx=cx, w=w, items=[b]))
+        return "".join("".join(b["text"] for b in sorted(c["items"], key=lambda b: b["y_min"])) for c in cols)
     group = sorted(group, key=lambda b: (b["y_min"] + b["y_max"]) / 2)
     rows = []
     for b in group:
@@ -223,12 +233,42 @@ def _join_text(group):
 MARKERS = "*＊#＃※★☆†‡✱✲⁎"
 
 
+def _is_vertical(b):
+    """O chu doc (chu Han xep tu tren xuong, vd tieu de tren to giay xoay 90 do): cao >= 1.5 x rong, tu 2 chu tro len."""
+    w, h = b["x_max"] - b["x_min"], b["y_max"] - b["y_min"]
+    return _is_cjk(b["text"]) and len(b["text"]) >= 2 and h >= 1.5 * w
+
+
+def _transpose(b):
+    """Doi cho x <-> y de dung lai luat gop theo hang cho chu doc."""
+    t = dict(b)
+    t["x_min"], t["x_max"], t["y_min"], t["y_max"] = b["y_min"], b["y_max"], b["x_min"], b["x_max"]
+    return t
+
+
+def _thickness(b):
+    """Be day 1 dong chu: chieu cao voi chu ngang, chieu rong voi chu doc."""
+    return (b["x_max"] - b["x_min"]) if _is_vertical(b) else (b["y_max"] - b["y_min"])
+
+
 def _should_merge(a, b):
     """2 o chu co thuoc CUNG 1 cau khong. Chat de hop den chi bao dung chu, khong gop nham 2 khoi khac nhau:
       - cung hang: chong nhau theo chieu doc >= 50% va cach nhau theo chieu ngang <= 1.0 x chieu cao chu;
       - xuong dong: hang duoi sat hang tren (cach <= 0.35 x chieu cao chu) va 2 hang chong nhau theo chieu ngang;
       - 2 o phai cao gan bang nhau (>= 65%); 1 o bat dau bang dau chu thich (* # ...) con o kia thi khong -> tach.
-    Khong gop cheo (lech ca hai chieu) nhu truoc."""
+    Khong gop cheo (lech ca hai chieu) nhu truoc.
+    Chu doc: 2 o cung doc thi dung y het luat tren sau khi doi x <-> y (cung COT; o ngan + o dai trong 1 cot
+    van gop vi chi so be day cot, khong so do dai); 1 o doc + 1 o ngang -> tach."""
+    va, vb = _is_vertical(a), _is_vertical(b)
+    if va != vb:
+        return False
+    if va:
+        a, b = _transpose(a), _transpose(b)     # sau khi doi truc, "chieu cao" = be day cot, "hang" = cot
+    return _should_merge_h(a, b)
+
+
+def _should_merge_h(a, b):
+    """Luat gop cho chu ngang (chu doc goi sau khi doi truc x <-> y)."""
     ha, hb = a["y_max"] - a["y_min"], b["y_max"] - b["y_min"]
     hmin, hmax = max(min(ha, hb), 1), max(ha, hb, 1)
     if hmin / hmax < 0.65:
@@ -278,7 +318,7 @@ def build_blocks(boxes, cjk_only=True):
             bbox=(min(b["x_min"] for b in g), max(b["x_max"] for b in g),
                   min(b["y_min"] for b in g), max(b["y_max"] for b in g)),
             conf=statistics.mean(b["conf"] for b in g),
-            row_h=statistics.median(b["y_max"] - b["y_min"] for b in g),
+            row_h=statistics.median(_thickness(b) for b in g),
             polys=[b["poly"] for b in g] if all(b.get("poly") for b in g) else []))
     blocks.sort(key=lambda b: (b["bbox"][2], b["bbox"][0]))
     return blocks
@@ -339,6 +379,7 @@ class Track:
         self.texts = [block["text"]]          # text OCR doc duoc o tung khung (song song voi frames)
         self.row_hs = [block.get("row_h", block["bbox"][3] - block["bbox"][2])]  # chieu cao 1 dong chu
         self.polys = [block.get("polys", [])]  # cac goc da giac cua tung o chu o tung khung (cho chu nghieng)
+        self.confs = [block["conf"]]
         self.score = collections.defaultdict(float)
         self.score[block["text"]] += block["conf"]
         self.last_t = t
@@ -348,6 +389,7 @@ class Track:
         self.texts.append(block["text"])
         self.row_hs.append(block.get("row_h", block["bbox"][3] - block["bbox"][2]))
         self.polys.append(block.get("polys", []))
+        self.confs.append(block["conf"])
         self.score[block["text"]] += block["conf"]
         self.last_t = t
 
@@ -363,19 +405,68 @@ class Track:
         return statistics.median(self.row_hs)
 
     def absorb(self, other):
-        pairs = sorted(list(zip(self.frames, self.texts, self.polys)) + list(zip(other.frames, other.texts, other.polys)),
+        pairs = sorted(list(zip(self.frames, self.texts, self.polys, self.row_hs, self.confs)) +
+                       list(zip(other.frames, other.texts, other.polys, other.row_hs, other.confs)),
                        key=lambda p: p[0][0])
         self.frames = [p[0] for p in pairs]
         self.texts = [p[1] for p in pairs]
         self.polys = [p[2] for p in pairs]
-        self.row_hs = sorted(self.row_hs + other.row_hs)
+        self.row_hs = [p[3] for p in pairs]
+        self.confs = [p[4] for p in pairs]
         for k, v in other.score.items():
             self.score[k] += v
         self.last_t = max(self.last_t, other.last_t)
 
+    def slice(self, i, j):
+        """Track con gom cac khung [i, j) (dung khi tach 1 track thanh nhieu cau)."""
+        new = Track.__new__(Track)
+        new.frames, new.texts, new.polys = self.frames[i:j], self.texts[i:j], self.polys[i:j]
+        new.row_hs, new.confs = self.row_hs[i:j], self.confs[i:j]
+        new.score = collections.defaultdict(float)
+        for tx, c in zip(new.texts, new.confs):
+            new.score[tx] += c
+        new.last_t = new.frames[-1][0]
+        return new
+
+
+def _gate_near(track_box, block_box):
+    """Khung moi co gan khung cuoi cua track khong (no track_box ra 1.5 x chieu cao chu moi phia)?"""
+    m = 1.5 * max(track_box[3] - track_box[2], 1.0)
+    return (min(track_box[1] + m, block_box[1]) - max(track_box[0] - m, block_box[0]) > 0 and
+            min(track_box[3] + m, block_box[3]) - max(track_box[2] - m, block_box[2]) > 0)
+
+
+def split_track(tr, step_sec, min_run_sec=0.3, split_sim=0.85):
+    """Tach 1 track thanh nhieu cau neu noi dung doi han giua chung.
+
+    Truoc day 2 cau lien tiep cung cho, giong nhau >= 60% (vd 'X出得有问题' -> 'Y出得有问题啊') bi gop
+    thanh 1 cau. Hai cau khac nhau thi moi cau OCR doc ra MOT noi dung on dinh (nhieu khung giong het nhau)
+    trong it nhat min_run_sec; con nhieu OCR cua cung 1 cau chi nhap nhay vai khung. Vay: tim cac doan 'on dinh'
+    (>= min_run khung lien tiep cung text); 2 doan on dinh ke nhau ma giong nhau < split_sim -> cat o giua."""
+    n = len(tr.frames)
+    min_run = max(3, round(min_run_sec / step_sec))
+    if n < 2 * min_run:
+        return [tr]
+    runs, i = [], 0
+    while i < n:
+        j = i
+        while j + 1 < n and tr.texts[j + 1] == tr.texts[i]:
+            j += 1
+        runs.append((i, j + 1, tr.texts[i]))
+        i = j + 1
+    stable = [r for r in runs if r[1] - r[0] >= min_run]
+    cuts = []
+    for r0, r1 in zip(stable, stable[1:]):
+        if similar(r0[2], r1[2]) < split_sim:
+            cuts.append((r0[1] + r1[0]) // 2)             # cat giua 2 doan on dinh (khung chuyen tiep chia doi)
+    if not cuts:
+        return [tr]
+    bounds = [0] + cuts + [n]
+    return [tr.slice(a, b) for a, b in zip(bounds, bounds[1:])]
+
 
 def build_tracks(samples, step_sec, similarity=0.6, max_gap_frames=2,
-                 min_frames=2, merge_sim=0.5):
+                 min_frames=2, merge_sim=0.5, split_sim=0.85, min_run_sec=0.3):
     """samples: list[(t, blocks)] theo thu tu thoi gian -> list[Track]."""
     active, done = [], []
     eps = 1e-6
@@ -384,7 +475,8 @@ def build_tracks(samples, step_sec, similarity=0.6, max_gap_frames=2,
         for bi, b in enumerate(blocks):
             for ti, tr in enumerate(active):
                 r = similar(tr.text(), b["text"])
-                if r >= similarity:
+                # giong it (0.6..0.85) thi con phai o gan khung cu: tranh dinh 2 cau khac nhau o 2 cho khac nhau
+                if r >= similarity and (r >= 0.85 or _gate_near(tr.frames[-1][1], b["bbox"])):
                     pairs.append((r, bi, ti))
         pairs.sort(reverse=True)
         used_b, used_t = set(), set()
@@ -406,7 +498,10 @@ def build_tracks(samples, step_sec, similarity=0.6, max_gap_frames=2,
         active = still
     done.extend(active)
 
-    # Noi cac manh bi OCR doc lech/hieu ung xuat hien lam dut thanh nhieu cau
+    # Noi cac manh bi OCR doc lech/hieu ung xuat hien lam dut thanh nhieu cau.
+    # Chi noi MANH NGAN (< min_run khung) hoac manh giong han (>= split_sim): 2 cau dai, ke nhau, giong ~50-80%
+    # la 2 cau khac nhau (khong noi, neu khong se gop cau).
+    min_run = max(3, round(min_run_sec / step_sec))
     done.sort(key=lambda tr: tr.start)
     merged = []
     for tr in done:
@@ -416,13 +511,18 @@ def build_tracks(samples, step_sec, similarity=0.6, max_gap_frames=2,
             if gap < -eps or gap > (max_gap_frames + 1) * step_sec + eps:
                 continue
             r = similar(prev.text(), tr.text())
-            if r >= merge_sim and r > best_r and _near(prev.frames[-1][1], tr.frames[0][1]):
+            fragment = min(len(prev.frames), len(tr.frames)) < min_run
+            if r >= merge_sim and (fragment or r >= split_sim) and r > best_r and _near(prev.frames[-1][1], tr.frames[0][1]):
                 best, best_r = prev, r
         if best:
             best.absorb(tr)
         else:
             merged.append(tr)
-    return [tr for tr in merged if len(tr.frames) >= min_frames]
+
+    out = []
+    for tr in merged:
+        out.extend(split_track(tr, step_sec, min_run_sec, split_sim))
+    return [tr for tr in out if len(tr.frames) >= min_frames]
 
 
 # --------------------------------------------------------------------------
@@ -581,49 +681,137 @@ def join_ends(tracks, step_sec, join_gap):
     return ends
 
 
-def tilt_cover(poly, min_tilt_deg=4.0, tol=0.35, max_k=16, text_frac=0.7):
-    """Chu nghieng (dong chu la hinh binh hanh 4 goc): thay hop chu nhat to bang
-    - band: hop nam ngang giua dong (chua chu viet, cao bang be day chu, rong text_frac x chieu dai dong);
-    - covers: chuoi hop nho doc theo duong cheo (moi hop chi cheo them <= tol x be day chu), phu kin chu cu.
-    Tra ve (band, covers) hoac None neu chu khong nghieng/khong du dieu kien.  Hop = (x1, x2, y1, y2)."""
+MAX_TILT_DEG = 80.0     # chu doc gan 90 do: hop bao ngoai da khit, khong can hop cheo
+MAX_COVERS = 16
+
+
+def _tilt_geom(poly):
+    """Da giac 4 goc cua 1 dong chu -> hinh binh hanh (tam C, vec-to huong dong a, vec-to be day b, L, t, theta).
+    Lay canh DAI lam huong dong chu (khong tin thu tu 4 diem: chu xoay > 45 do thi canh 0-1 la canh ngan),
+    chuan hoa a huong sang phai (ax > 0), b huong xuong (by > 0) de thu tu cac hop con khong lat giua cac khung.
+    None neu khong phai dong chu dai (L < 2t) hoac gan thang dung (> MAX_TILT_DEG)."""
     if not poly or len(poly) != 4:
         return None
     (x0, y0), (x1, y1), (x2, y2), (x3, y3) = poly
-    ax, ay = ((x1 - x0) + (x2 - x3)) / 2, ((y1 - y0) + (y2 - y3)) / 2     # huong dong chu (canh 0-1)
-    bx, by = ((x3 - x0) + (x2 - x1)) / 2, ((y3 - y0) + (y2 - y1)) / 2     # be day (canh 0-3)
+    e1 = ((x1 - x0) + (x2 - x3)) / 2, ((y1 - y0) + (y2 - y3)) / 2     # canh 0-1 va 3-2
+    e2 = ((x3 - x0) + (x2 - x1)) / 2, ((y3 - y0) + (y2 - y1)) / 2     # canh 0-3 va 1-2
+    (ax, ay), (bx, by) = (e1, e2) if math.hypot(*e1) >= math.hypot(*e2) else (e2, e1)
     L, t = math.hypot(ax, ay), math.hypot(bx, by)
-    if t < 1 or L < 2 * t:                                                  # chu doc/ngan: khong xu ly
+    if t < 1 or L < 2 * t:                                              # chu ngan/vuong: khong xu ly
         return None
-    theta = math.degrees(math.atan2(ay, ax))
-    if theta > 90:
-        theta -= 180
-    elif theta < -90:
-        theta += 180
-    if abs(theta) < min_tilt_deg or abs(theta) > 45:
+    if ax < 0:
+        ax, ay = -ax, -ay
+    if by < 0:
+        bx, by = -bx, -by
+    theta = math.degrees(math.atan2(ay, ax))                            # (-90, 90)
+    if abs(theta) > MAX_TILT_DEG:
         return None
-    sin_t, cos_t = abs(math.sin(math.radians(theta))), math.cos(math.radians(theta))
-    k = max(2, min(max_k, math.ceil(L * sin_t / (tol * t))))
+    return dict(cx=(x0 + x1 + x2 + x3) / 4, cy=(y0 + y1 + y2 + y3) / 4, ax=ax, ay=ay, bx=bx, by=by,
+                L=L, t=t, theta=theta)
+
+
+def _tilt_k(g, tol=0.35):
+    """So hop con can de moi hop chi thua <= tol x be day chu theo chieu lech (chieu ngan hon cua hop bao ngoai
+    1 doan: (L/k) * min(|sin|, |cos|))."""
+    th = math.radians(g["theta"])
+    slack = g["L"] * min(abs(math.sin(th)), abs(math.cos(th)))
+    return max(2, min(MAX_COVERS, math.ceil(slack / (tol * g["t"]))))
+
+
+def _tilt_boxes(g, k, text_frac=0.7):
+    """(band, covers) tu hinh binh hanh g va so hop con k. Hop = (x1, x2, y1, y2).
+    band: hop o giua dong, chua chu viet (nghieng <= 45 do: rong text_frac x L, cao t / cos; doc hon: nguoc lai)."""
     covers = []
     for i in range(k):
-        s0, s1 = i / k, (i + 1) / k
-        pts = [(x0 + s * ax + r * bx, y0 + s * ay + r * by) for s in (s0, s1) for r in (0.0, 1.0)]
-        xs, ys = [q[0] for q in pts], [q[1] for q in pts]
+        s0, s1 = i / k - 0.5, (i + 1) / k - 0.5
+        xs, ys = [], []
+        for s in (s0, s1):
+            for r in (-0.5, 0.5):
+                xs.append(g["cx"] + s * g["ax"] + r * g["bx"])
+                ys.append(g["cy"] + s * g["ay"] + r * g["by"])
         covers.append((min(xs), max(xs), min(ys), max(ys)))
-    cx, cy = x0 + (ax + bx) / 2, y0 + (ay + by) / 2
-    w, h = text_frac * L * cos_t, t / cos_t
-    band = (cx - w / 2, cx + w / 2, cy - h / 2, cy + h / 2)
+    th = math.radians(g["theta"])
+    cos_t, sin_t = math.cos(th), abs(math.sin(th))
+    if abs(g["theta"]) <= 45:
+        w, h = text_frac * g["L"] * cos_t, g["t"] / cos_t
+    else:
+        w, h = g["t"] / sin_t, text_frac * g["L"] * sin_t
+    band = (g["cx"] - w / 2, g["cx"] + w / 2, g["cy"] - h / 2, g["cy"] + h / 2)
+    return band, covers
+
+
+def tilt_cover(poly, min_tilt_deg=4.0, tol=0.35, max_k=MAX_COVERS, text_frac=0.7):
+    """Chu nghieng (dong chu la hinh binh hanh 4 goc): thay hop chu nhat to bang
+    - band: hop nam giua dong (chua chu viet);
+    - covers: chuoi hop nho doc theo duong cheo (moi hop chi cheo them <= tol x be day chu), phu kin chu cu.
+    Tra ve (band, covers) hoac None neu chu khong nghieng (< min_tilt_deg) / khong du dieu kien."""
+    g = _tilt_geom(poly)
+    if g is None or abs(g["theta"]) < min_tilt_deg:
+        return None
+    return _tilt_boxes(g, min(max_k, _tilt_k(g, tol)), text_frac)
+
+
+def tilt_cover_multi(polys, min_tilt_deg=4.0):
+    """Nhu tilt_cover nhung cho khoi co NHIEU dong chu (OCR cat 1 cau nghieng thanh nhieu da giac, hoac cau 2 dong):
+    moi dong nghieng -> hop chinh + hop con; dong thang -> 1 hop bao ngoai. Hop chinh (chua chu) = dong nghieng dai nhat.
+    None neu khong dong nao nghieng."""
+    geoms = [(p, _tilt_geom(p)) for p in polys]
+    tilted = [(p, g) for p, g in geoms if g is not None and abs(g["theta"]) >= min_tilt_deg]
+    if not tilted:
+        return None
+    main_g = max(tilted, key=lambda pg: pg[1]["L"])[1]
+    band, covers = _tilt_boxes(main_g, _tilt_k(main_g))
+    for p, g in geoms:
+        if g is main_g:
+            continue
+        if g is not None and abs(g["theta"]) >= min_tilt_deg:
+            bd, cv = _tilt_boxes(g, _tilt_k(g))
+            covers.extend([bd] + cv)
+        else:
+            xs, ys = [q[0] for q in p], [q[1] for q in p]
+            covers.append((min(xs), max(xs), min(ys), max(ys)))
     return band, covers
 
 
 def _tilt_for_track(tr, main, tilt_deg):
-    """Chu nghieng dung yen (1 dong, co goc da giac) -> (band, covers); khong thi None."""
+    """Chu nghieng DUNG YEN -> (band, covers); khong thi None."""
     if tilt_deg <= 0 or not tr.polys:
         return None
     idx = min(range(len(tr.frames)), key=lambda i: _boxdiff(tr.frames[i][1], main))
     polys = tr.polys[idx]
-    if len(polys) != 1:
+    if not polys:
         return None
-    return tilt_cover(polys[0], min_tilt_deg=tilt_deg)
+    return tilt_cover_multi(polys, min_tilt_deg=tilt_deg)
+
+
+def _tilt_dynamic(tr, main, kfs, tilt_deg):
+    """Chu nghieng/xoay VA chuyen dong (to giay bay + xoay, cau phong to...): hop bao ngoai cua chu xoay phinh to
+    theo duong cheo -> thay bang hop chinh + K hop con, MOI hop co chuoi KF rieng (cung moc thoi gian voi kfs).
+    Tra ve (main_boxes, kf_boxes) hoac None; main_boxes = [band, cover_1..K]; kf_boxes = [(t, [band, cover_1..K]), ...]
+    Chi dung khung hinh co dung 1 da giac (khung khac lay hinh gan nhat), can >= 60% khung hop le va co khung nghieng."""
+    if tilt_deg <= 0 or not tr.polys or not kfs:
+        return None
+    geoms = [_tilt_geom(pl[0]) if len(pl) == 1 else None for pl in tr.polys]
+    valid = [i for i, g in enumerate(geoms) if g is not None]
+    if len(valid) < max(2, 0.6 * len(geoms)) or not any(abs(geoms[i]["theta"]) >= tilt_deg for i in valid):
+        return None
+    K = max(_tilt_k(geoms[i]) for i in valid)
+    boxes = {i: _tilt_boxes(geoms[i], K) for i in valid}
+    flat = {i: [bd] + cv for i, (bd, cv) in boxes.items()}
+
+    def nearest_valid(t):
+        return min(valid, key=lambda i: abs(tr.frames[i][0] - t))
+
+    def at(t):
+        c = nearest_valid(t)
+        pos = valid.index(c)
+        if pos == 0 or pos == len(valid) - 1:               # dau/cuoi: giu dung khung (trung vi 2 khung se lech nua buoc)
+            return list(flat[c])
+        near = [flat[valid[q]] for q in (pos - 1, pos, pos + 1)]
+        return [tuple(statistics.median(nb[j][d] for nb in near) for d in range(4)) for j in range(K + 1)]
+
+    idx = min(valid, key=lambda i: _boxdiff(tr.frames[i][1], main))
+    return flat[idx], [(t, at(t)) for t, _ in kfs]
 
 
 def format_srtpx(tracks, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, med_win=5,
@@ -651,17 +839,28 @@ def format_srtpx(tracks, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, me
             print(f"#{n:>3} {tr.text()[:12]:<12} -> {classify_motion(tr, step_sec, move_tol, med_win, min_move_sec)[3]}",
                   file=sys.stderr)
         rh = tr.row_h()
+        padb = lambda b: pad_box(b, rh, pad_ratio, width, height)
         tilt = None if kfs else _tilt_for_track(tr, main, tilt_deg)
         if tilt:                                    # chu nghieng: hop chinh = dai ngang giua, them hop che doc duong cheo
             band, covers = tilt
-            entry(tr.text(), tr.start, end_t, pad_box(band, rh, pad_ratio, width, height))
+            entry(tr.text(), tr.start, end_t, padb(band))
             for cv in covers:                       # block khong co chu: chi ve hop den
-                entry("", tr.start, end_t, pad_box(cv, rh, pad_ratio, width, height))
+                entry("", tr.start, end_t, padb(cv))
             if report:
                 print(f"      chu nghieng -> 1 hop chinh + {len(covers)} hop che", file=sys.stderr)
             continue
-        main = pad_box(main, rh, pad_ratio, width, height)
-        kfs = [(t, pad_box(b, rh, pad_ratio, width, height)) for t, b in kfs]
+        dyn = _tilt_dynamic(tr, main, kfs, tilt_deg) if kfs else None
+        if dyn:                                     # chu nghieng/xoay + chuyen dong: moi hop co KF rieng
+            main_boxes, kf_boxes = dyn
+            for j, mb in enumerate(main_boxes):
+                entry(tr.text() if j == 0 else "", tr.start, end_t, padb(mb),
+                      [(t, padb(bs[j])) for t, bs in kf_boxes])
+            if report:
+                print(f"      chu xoay + dong -> 1 hop chinh + {len(main_boxes) - 1} hop che, {len(kf_boxes)} KF",
+                      file=sys.stderr)
+            continue
+        main = padb(main)
+        kfs = [(t, padb(b)) for t, b in kfs]
         entry(tr.text(), tr.start, end_t, main, kfs)
     return f"#res {width}x{height}\r\n\r\n" + "\r\n\r\n".join(entries)
 
@@ -721,6 +920,10 @@ def main():
                     help="Ngưỡng giống nhau để coi 2 khung là cùng 1 câu (0..1)")
     ap.add_argument("--merge-sim", type=float, default=0.5,
                     help="Ngưỡng nối các mảnh câu bị đứt do OCR/hiệu ứng (0..1)")
+    ap.add_argument("--split-sim", type=float, default=0.85,
+                    help="2 doan text on dinh ke nhau trong 1 cau giong nhau < so nay -> tach thanh 2 cau (0..1; 0 = tat)")
+    ap.add_argument("--min-run-sec", type=float, default=0.3,
+                    help="Mot noi dung phai on dinh it nhat so giay nay moi tinh la 1 cau rieng khi tach cau")
     ap.add_argument("--max-gap-frames", type=int, default=2,
                     help="Số khung OCR trống liên tiếp tối đa vẫn coi là cùng 1 câu")
     ap.add_argument("--min-frames", type=int, default=2, help="Số khung tối thiểu để 1 câu được tính")
@@ -781,7 +984,7 @@ def main():
 
     tracks = build_tracks(samples, step_sec, similarity=args.similarity,
                           max_gap_frames=args.max_gap_frames, min_frames=args.min_frames,
-                          merge_sim=args.merge_sim)
+                          merge_sim=args.merge_sim, split_sim=args.split_sim, min_run_sec=args.min_run_sec)
     write_srtpx(tracks, args.output, w, h, step_sec, args.kf_tol, args.stable_sec,
                 args.med_win, args.min_move_sec, args.report, args.move_tol,
                 args.pad, args.join_gap, args.tilt)

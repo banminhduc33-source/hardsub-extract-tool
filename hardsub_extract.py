@@ -99,6 +99,29 @@ def seconds_to_srt_ts(t):
 # 2) OCR
 # --------------------------------------------------------------------------
 
+def _force_paddle_no_ir(config_cls=None):
+    """Ep Paddle Inference KHONG chay cac pass toi uu IR (SelfAttentionFusePass... gay SIGILL / exit 132 tren CPU
+    runner thieu AVX).  paddleocr 2.7.x tu goi config.switch_ir_optim(True) trong create_predictor nen tham so
+    ir_optim=False cua PaddleOCR bi bo qua -> vo hieu hoa o cap Config.  config_cls chi de test."""
+    try:
+        if config_cls is None:
+            from paddle import inference
+            config_cls = inference.Config
+        if getattr(config_cls, "_hardsub_no_ir", False):
+            return True
+        orig = config_cls.switch_ir_optim
+
+        def switch_ir_optim(self, x=True):
+            return orig(self, False)
+
+        config_cls.switch_ir_optim = switch_ir_optim
+        config_cls._hardsub_no_ir = True
+        return True
+    except Exception as e:                      # khong chan chay neu ban Paddle khac
+        print(f"Canh bao: khong tat duoc IR optim cua Paddle ({e})", file=sys.stderr)
+        return False
+
+
 class OcrEngine:
     """Lớp bọc chung cho 3 backend: tesseract / easyocr / paddleocr.
 
@@ -114,6 +137,7 @@ class OcrEngine:
         self._backend = None
 
         if engine == "paddleocr":
+            _force_paddle_no_ir()
             from paddleocr import PaddleOCR  # lazy import
             # CPU cua runner GitHub co the thieu tap lenh (AVX/oneDNN) ma cac pass
             # toi uu cua Paddle Inference dung -> SIGILL (exit 132) trong

@@ -417,9 +417,15 @@ class Track:
         self.score[block["text"]] += block["conf"]
         self.last_t = t
 
+    refined_start = None      # giay; do refine_edges() dat sau khi gom track (None = dung khung OCR dau tien)
+    refined_end = None        # giay (loai tru); None = khung OCR cuoi + 1 buoc lay mau
+
     @property
     def start(self):
-        return self.frames[0][0]
+        return self.refined_start if self.refined_start is not None else self.frames[0][0]
+
+    def end_t(self, step_sec):
+        return self.refined_end if self.refined_end is not None else self.last_t + step_sec
 
     def text(self):
         return max(self.score, key=lambda k: (self.score[k], len(k)))
@@ -550,6 +556,125 @@ def build_tracks(samples, step_sec, similarity=0.6, max_gap_frames=2,
 
 
 # --------------------------------------------------------------------------
+# 3b) TINH CHINH MOC BAT DAU / KET THUC THEO KHUNG HINH GOC
+# --------------------------------------------------------------------------
+# OCR chi chay o cac khung lay mau (--fps 10 tren video 30fps = cu 3 khung 1 lan), lai hay bo sot khung dau khi chu
+# dang hien dan (mo/nhat). Nen moc bat dau thuong tre 1-3 khung so voi luc chu that su hien -> chu goc hien ra truoc
+# roi 1 khung sau moi co hop den. Ham nay xem lai CAC KHUNG GOC nam sat truoc dau / sau cuoi moi cau, khong can OCR:
+# chu da hien thi khi cac net chu (canh) cua khung on dinh van nam dung cho cu trong khung do.
+
+def _edge_map(gray):
+    return cv2.Canny(cv2.GaussianBlur(gray, (3, 3), 0), 60, 160) > 0
+
+
+def _coverage(ref, gray):
+    """Ti le net chu (ref: mat na canh cua khung on dinh) con nam dung cho cu trong anh gray (cho lech ~1px)."""
+    near = cv2.dilate(_edge_map(gray).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+    return float((ref & near).sum()) / float(ref.sum())
+
+
+def _text_region(tr, width, height):
+    box = _median_box([b for _, b in tr.frames])
+    p = 2.0 + 0.3 * tr.row_h()
+    x1, x2 = max(0, int(box[0] - p)), min(width, int(math.ceil(box[1] + p)))
+    y1, y2 = max(0, int(box[2] - p)), min(height, int(math.ceil(box[3] + p)))
+    return (x1, x2, y1, y2) if x2 - x1 >= 4 and y2 - y1 >= 4 else None
+
+
+def refine_edges(video_path, tracks, native_fps, step, width, height, reach=None, min_cov=0.55, min_ref_px=40):
+    """Dat tr.refined_start / tr.refined_end sat voi khung hinh goc dau tien / cuoi cung co chu.
+
+    reach = so khung goc toi da xet lui (truoc dau) va toi (sau cuoi) cho moi cau, mac dinh max(step, 4).
+    Bo qua cau chu chuyen dong (KF) va cau khong du net chu de so. Tra ve so moc da doi."""
+    if not tracks:
+        return 0
+    reach = max(step, 4) if reach is None else max(1, int(reach))
+    jobs = []                           # (track, region, f_first, f_last)
+    need = collections.defaultdict(list)
+    for tr in tracks:
+        region = _text_region(tr, width, height)
+        if region is None or classify_motion(tr, step / native_fps)[0]:
+            continue
+        f0 = int(round(tr.frames[0][0] * native_fps))
+        f1 = int(round(tr.last_t * native_fps))
+        j = len(jobs)
+        jobs.append((tr, region, f0, f1))
+        want = {f0, f1}
+        if len(tr.frames) >= 2:
+            want |= {int(round(tr.frames[1][0] * native_fps)), int(round(tr.frames[-2][0] * native_fps))}
+        want |= {f0 - k for k in range(1, reach + 2)} | {f1 + k for k in range(1, reach + 2)}
+        for f in want:
+            if f >= 0:
+                need[f].append(j)
+    if not need:
+        return 0
+
+    crops = {}
+    last_needed = max(need)
+    cap = cv2.VideoCapture(video_path)
+    idx = 0
+    while idx <= last_needed:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        for j in need.get(idx, ()):
+            x1, x2, y1, y2 = jobs[j][1]
+            crops[(j, idx)] = cv2.cvtColor(frame[y1:y2, x1:x2], cv2.COLOR_BGR2GRAY)
+        idx += 1
+    cap.release()
+
+    changed = 0
+    for j, (tr, region, f0, f1) in enumerate(jobs):
+        def has(f):
+            return crops.get((j, f)) is not None
+
+        def refmask(fa, fb):
+            """Net chu on dinh: canh cua khung fa (neu khung fb cung co thi chi giu net co o ca hai)."""
+            if not has(fa):
+                return None
+            m = _edge_map(crops[(j, fa)])
+            if has(fb) and fb != fa:
+                near = cv2.dilate(_edge_map(crops[(j, fb)]).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+                both = m & near
+                if both.sum() >= min_ref_px:
+                    m = both
+            return m if m.sum() >= min_ref_px else None
+
+        t1 = int(round(tr.frames[1][0] * native_fps)) if len(tr.frames) >= 2 else f0
+        t2 = int(round(tr.frames[-2][0] * native_fps)) if len(tr.frames) >= 2 else f1
+        # --- dau cau: lui tung khung goc khi chu da hien ---
+        ref = refmask(f0, t1)
+        if ref is not None:
+            base = _coverage(ref, crops[(j, f0 - reach - 1)]) if has(f0 - reach - 1) else 0.0
+            thr = max(min_cov, min(0.9, base + 0.2))        # nen nhieu net (da trung ref san) -> doi chat hon
+            first = f0
+            for k in range(1, reach + 1):
+                if has(f0 - k) and _coverage(ref, crops[(j, f0 - k)]) >= thr:
+                    first = f0 - k
+                else:
+                    break
+            if first != f0:
+                tr.refined_start = first / native_fps
+                changed += 1
+        # --- cuoi cau: toi tung khung goc khi chu con hien ---
+        ref = refmask(f1, t2)
+        if ref is not None:
+            base = _coverage(ref, crops[(j, f1 + reach + 1)]) if has(f1 + reach + 1) else 0.0
+            thr = max(min_cov, min(0.9, base + 0.2))
+            last = f1
+            for k in range(1, reach + 1):
+                if has(f1 + k) and _coverage(ref, crops[(j, f1 + k)]) >= thr:
+                    last = f1 + k
+                else:
+                    break
+            new_end = (last + 1) / native_fps
+            if abs(new_end - tr.end_t(step / native_fps)) > 1e-9:
+                tr.refined_end = new_end
+                changed += 1
+    return changed
+
+
+# --------------------------------------------------------------------------
 # 4) KHUNG CHU: on dinh hay chuyen dong (KF)
 # --------------------------------------------------------------------------
 
@@ -675,7 +800,7 @@ def join_ends(tracks, step_sec, join_gap):
     Chi noi 2 cau cung "lan" (khung chu chong nhau theo chieu doc >= 50% chieu cao khung thap hon),
     de cau o cho khac (bang to, chu phu...) hien cung luc khong bi keo dai nham.
     tracks phai da sap theo thoi gian bat dau. Tra ve list end_t (giay) song song voi tracks."""
-    ends = [tr.last_t + step_sec for tr in tracks]
+    ends = [tr.end_t(step_sec) for tr in tracks]
     if join_gap <= 0:
         return ends
     eps = 1e-6
@@ -970,6 +1095,11 @@ def main():
     ap.add_argument("--tilt", type=float, default=4.0,
                     help="Chu nghieng tu so do nay tro len thi thay hop den to bang chuoi hop nho doc theo duong cheo "
                          "(chi cho chu dung yen, can goc da giac cua OCR: paddleocr/easyocr), 0 = tat")
+    ap.add_argument("--no-refine", action="store_true",
+                    help="Tat buoc tinh chinh moc bat dau/ket thuc theo tung khung hinh goc (mac dinh bat: lui moc dau "
+                         "ve dung khung chu bat dau hien, tranh chu hien truoc roi 1 khung sau moi co hop den)")
+    ap.add_argument("--refine-reach", type=int, default=None,
+                    help="So khung goc toi da xet lui/toi moi dau cau khi tinh chinh (mac dinh max(buoc lay mau, 4))")
     ap.add_argument("--debug-dir", default=None, help="Thư mục lưu ảnh debug đã kẻ khung")
     ap.add_argument("--debug-every", type=int, default=15, help="Lưu debug mỗi N frame đã xử lý")
     args = ap.parse_args()
@@ -1009,6 +1139,9 @@ def main():
     tracks = build_tracks(samples, step_sec, similarity=args.similarity,
                           max_gap_frames=args.max_gap_frames, min_frames=args.min_frames,
                           merge_sim=args.merge_sim, split_sim=args.split_sim, min_run_sec=args.min_run_sec)
+    if not args.no_refine:
+        n_ref = refine_edges(args.video, tracks, info["native_fps"], info["step"], w, h, reach=args.refine_reach)
+        print(f"Tinh chinh moc thoi gian theo khung goc: doi {n_ref} moc", file=sys.stderr)
     write_srtpx(tracks, args.output, w, h, step_sec, args.kf_tol, args.stable_sec,
                 args.med_win, args.min_move_sec, args.report, args.move_tol,
                 args.pad, args.join_gap, args.tilt)

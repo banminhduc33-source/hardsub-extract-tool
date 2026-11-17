@@ -177,7 +177,7 @@ jobs:
             local name="$1"
             local zh="work/$name.zh.srtpx"
             local target="out/$name.srtpx"
-            local zh_han left n=0 wait_s now deadline rc
+            local zh_han left n=0 wait_s now deadline
             zh_han=$(han_count "$zh")
             if [ "$zh_han" -eq 0 ]; then
               echo "Khong co chu Han de dich trong $name."
@@ -198,12 +198,6 @@ jobs:
                 fi
                 echo "::warning::Lan $n: script bao xong nhung con $left/$zh_han chu Han -> thu lai"
               else
-                rc=$?
-                if [ "$rc" -eq 2 ]; then
-                  echo "::error::Loi cau hinh (sai model / het key) -> KHONG thu lai de khong dot key. Sua GEMINI_MODEL hoac key roi chay lai."
-                  cp "$zh" "$target"
-                  return 1
-                fi
                 echo "::warning::Lan $n: loi/timeout khi goi Gemini -> thu lai"
               fi
               wait_s=$(( n * 20 )); [ "$wait_s" -gt 300 ] && wait_s=300

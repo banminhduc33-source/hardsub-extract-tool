@@ -45,14 +45,6 @@ def log(msg):
     print(msg, flush=True)
 
 
-CONFIG_EXIT = 2  # loi cau hinh (sai model, het key...): workflow KHONG duoc thu lai
-
-
-def fatal(msg):
-    print(msg, flush=True)
-    sys.exit(CONFIG_EXIT)
-
-
 class KeyPool:
     """Danh sach nhieu API key, xoay vong khi het quota hoac key bi tu choi."""
 
@@ -78,7 +70,7 @@ class KeyPool:
     def kill_current(self, why):
         self.dead.add(self.keys[self.i])
         if not self.alive():
-            fatal("[LOI CAU HINH] Tat ca API key deu bi tu choi. Loi cuoi: %s" % why)
+            sys.exit("[LOI CAU HINH] Tat ca API key deu bi tu choi. Loi cuoi: %s" % why)
         self.rotate()
 
 
@@ -155,11 +147,8 @@ def translate_chunk(pool, model, texts, timeout, label=""):
             if e.code == 404 or e.code in KEY_REJECTED_HTTP:
                 detail = e.read().decode("utf-8", "replace")[:300]
             if e.code == 404:
-                fatal("[LOI CAU HINH] Gemini tra ve 404: %s\n"
-                      "Kiem tra ten model (GEMINI_MODEL)." % detail)
-            if e.code == 400 and not re.search(r"api[ _]key", detail, re.I):
-                fatal("[LOI CAU HINH] Gemini tra ve 400 (khong phai loi key, khong loai key nao): %s\n"
-                      "Kiem tra ten model (GEMINI_MODEL) / noi dung gui." % detail)
+                sys.exit("[LOI CAU HINH] Gemini tra ve 404: %s\n"
+                         "Kiem tra ten model (GEMINI_MODEL)." % detail)
             if e.code in KEY_REJECTED_HTTP:
                 log("   %sKey #%d bi tu choi (%d), loai khoi danh sach" % (
                     label, pool.keys.index(pool.current()) + 1, e.code))
@@ -204,7 +193,7 @@ def main():
 
     keys = load_keys()
     if not keys:
-        fatal("[LOI] Chua co API key: dat secret/bien GEMINI_API_KEYS (moi dong 1 key) hoac file keys.txt")
+        sys.exit("[LOI] Chua co API key: dat secret/bien GEMINI_API_KEYS (moi dong 1 key) hoac file keys.txt")
     pool = KeyPool(keys)
 
     with open(args.input, "r", encoding="utf-8-sig", newline="") as f:

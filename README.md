@@ -60,6 +60,12 @@ Fps càng cao thì mốc thời gian càng sát (30fps khớp mẫu nhất) như
 | `--split-sim` | 2 đoạn chữ ổn định kề nhau trong cùng 1 câu mà giống nhau < số này (mặc định 0.85) thì **tách thành 2 câu** (trước đây câu liền kề giống ≥60% bị gộp thành 1). `0` = tắt |
 | `--min-run-sec` | Một nội dung phải ổn định ít nhất số giây này mới tính là 1 câu riêng khi tách (mặc định 0.3) |
 | `--scale` | Phóng to vùng quét trước khi OCR (chữ nhỏ → tăng lên) |
+| `--no-refine` | Tắt bước tinh chỉnh mốc thời gian (xem dưới). Mặc định **bật** |
+| `--refine-reach` | Số khung gốc tối đa xét lùi/tới ở mỗi đầu câu khi tinh chỉnh (mặc định `max(bước lấy mẫu, 4)`) |
+
+### Tinh chỉnh mốc bắt đầu/kết thúc theo khung gốc
+
+OCR chỉ chạy ở các khung lấy mẫu (`--fps 10` trên video 30fps = cứ 3 khung một lần) và hay bỏ sót khung đầu khi chữ đang hiện dần, nên mốc bắt đầu thường trễ 1–3 khung: chữ gốc hiện ra trước rồi 1 khung sau mới có hộp đen. Sau khi gom câu, tool đọc lại các **khung gốc** sát trước đầu/sau cuối mỗi câu (không OCR, chỉ so nét chữ trong vùng chữ) và dời mốc về đúng khung chữ bắt đầu hiện / vừa tắt. Câu chữ chuyển động (có KF) không bị đổi.
 
 ## Dịch sang tiếng Việt (Gemini)
 

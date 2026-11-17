@@ -217,6 +217,32 @@ def _join_text(group):
     return " ".join(parts)
 
 
+MARKERS = "*＊#＃※★☆†‡✱✲⁎"
+
+
+def _should_merge(a, b):
+    """2 o chu co thuoc CUNG 1 cau khong. Chat de hop den chi bao dung chu, khong gop nham 2 khoi khac nhau:
+      - cung hang: chong nhau theo chieu doc >= 50% va cach nhau theo chieu ngang <= 1.0 x chieu cao chu;
+      - xuong dong: hang duoi sat hang tren (cach <= 0.35 x chieu cao chu) va 2 hang chong nhau theo chieu ngang;
+      - 2 o phai cao gan bang nhau (>= 65%); 1 o bat dau bang dau chu thich (* # ...) con o kia thi khong -> tach.
+    Khong gop cheo (lech ca hai chieu) nhu truoc."""
+    ha, hb = a["y_max"] - a["y_min"], b["y_max"] - b["y_min"]
+    hmin, hmax = max(min(ha, hb), 1), max(ha, hb, 1)
+    if hmin / hmax < 0.65:
+        return False
+    if (a["text"][:1] in MARKERS) != (b["text"][:1] in MARKERS):
+        return False
+    vover = min(a["y_max"], b["y_max"]) - max(a["y_min"], b["y_min"])      # >0: chong nhau theo chieu doc
+    hgap = max(a["x_min"], b["x_min"]) - min(a["x_max"], b["x_max"])      # <0: chong nhau theo chieu ngang
+    if vover >= 0.5 * hmin and hgap <= 1.0 * hmax:                          # cung hang
+        return True
+    wmin = max(min(a["x_max"] - a["x_min"], b["x_max"] - b["x_min"]), 1)
+    hover = -hgap
+    if -vover <= 0.35 * hmax and vover < 0.5 * hmin and hover >= 0.4 * wmin:  # hang duoi sat hang tren
+        return True
+    return False
+
+
 def build_blocks(boxes, cjk_only=True):
     """Gom cac o chu gan nhau thanh khoi (1 cau). boxes da o toa do khung hinh goc.
     Tra ve list[dict(text, bbox=(x_min,x_max,y_min,y_max), conf)]."""
@@ -235,11 +261,7 @@ def build_blocks(boxes, cjk_only=True):
 
     for i in range(n):
         for j in range(i + 1, n):
-            a, b = boxes[i], boxes[j]
-            h = max(a["y_max"] - a["y_min"], b["y_max"] - b["y_min"], 1)
-            vgap = max(a["y_min"], b["y_min"]) - min(a["y_max"], b["y_max"])
-            hgap = max(a["x_min"], b["x_min"]) - min(a["x_max"], b["x_max"])
-            if vgap <= 0.8 * h and hgap <= 1.5 * h:
+            if _should_merge(boxes[i], boxes[j]):
                 parent[find(i)] = find(j)
 
     groups = collections.defaultdict(list)
@@ -648,8 +670,8 @@ def main():
                     help="In ra stderr từng câu được xếp là tĩnh/động và lý do")
     ap.add_argument("--stable-sec", type=float, default=0.5,
                     help="Khung giữ yên ít nhất số giây này mới coi là khung ổn định chính")
-    ap.add_argument("--pad", type=float, default=0.25,
-                    help="No hop den ra moi phia = so nay x chieu cao 1 dong chu (che het vien chu), 0 = tat")
+    ap.add_argument("--pad", type=float, default=0.05,
+                    help="No hop den ra moi phia = so nay x chieu cao 1 dong chu, toi thieu 2px (mac dinh 0.05: hop sat chu), 0 = tat")
     ap.add_argument("--join-gap", type=float, default=0.3,
                     help="2 cau lien tiep cach nhau <= so giay nay thi noi duoi cau truoc vao dau cau sau, 0 = tat")
     ap.add_argument("--debug-dir", default=None, help="Thư mục lưu ảnh debug đã kẻ khung")

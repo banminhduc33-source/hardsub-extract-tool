@@ -258,15 +258,29 @@ def build_blocks(boxes, cjk_only=True):
     return blocks
 
 
-def detect_frame_blocks(engine, roi_img, roi_offset, scale, cjk_only=True):
-    """OCR 1 frame da crop ROI -> list khoi chu, toa do quy ve khung hinh goc."""
+def count_chars(text, cjk_only=True):
+    """So chu that su (khong tinh khoang trang/ky hieu); cjk_only -> chi dem chu Han."""
+    if cjk_only:
+        return sum(1 for ch in text if _is_cjk(ch))
+    return sum(1 for ch in text if ch.isalnum())
+
+
+def detect_frame_blocks(engine, roi_img, roi_offset, scale, cjk_only=True, min_h=0.0, min_chars=1):
+    """OCR 1 frame da crop ROI -> list khoi chu, toa do quy ve khung hinh goc.
+
+    Chi giu chu LON, ro (hien thi tren man hinh): bo o chu cao < min_h px (chu li ti trong bang/UI/watermark)
+    va bo khoi co it hon min_chars chu."""
     ox, oy = roi_offset
     boxes = []
     for b in engine.detect(roi_img):
+        y_min, y_max = b["y_min"] / scale + oy, b["y_max"] / scale + oy
+        if y_max - y_min < min_h:
+            continue
         boxes.append(dict(text=b["text"], conf=b["conf"],
                           x_min=b["x_min"] / scale + ox, x_max=b["x_max"] / scale + ox,
-                          y_min=b["y_min"] / scale + oy, y_max=b["y_max"] / scale + oy))
-    return build_blocks(boxes, cjk_only)
+                          y_min=y_min, y_max=y_max))
+    blocks = build_blocks(boxes, cjk_only)
+    return [bl for bl in blocks if count_chars(bl["text"], cjk_only) >= min_chars]
 
 
 # --------------------------------------------------------------------------
@@ -607,7 +621,12 @@ def main():
     ap.add_argument("--lang", default="chi_sim",
                     help="tesseract='chi_sim'/'chi_tra', paddleocr='ch'/'chinese_cht', easyocr='ch_sim'/'ch_tra'")
     ap.add_argument("--scale", type=float, default=2.0, help="Phóng to ROI trước khi OCR")
-    ap.add_argument("--min-conf", type=float, default=0.4, help="Ngưỡng tin cậy OCR tối thiểu (0..1)")
+    ap.add_argument("--min-conf", type=float, default=0.6, help="Ngưỡng tin cậy OCR tối thiểu (0..1)")
+    ap.add_argument("--min-height", type=float, default=0.035,
+                    help="Chỉ lấy chữ cao ít nhất tỉ lệ này so với chiều cao video (mặc định 0.035 = 3.5%%); "
+                         "chữ nhỏ li ti trong bảng/giao diện bị bỏ. 0 = tắt")
+    ap.add_argument("--min-chars", type=int, default=2,
+                    help="Một khối chữ phải có ít nhất ngần này chữ mới được lấy (mặc định 2)")
     ap.add_argument("--keep-non-cjk", action="store_true",
                     help="Giữ cả chữ không phải chữ Hán (mặc định bỏ để tránh dính số/logo)")
     ap.add_argument("--similarity", type=float, default=0.6,
@@ -658,7 +677,8 @@ def main():
             roi_img = cv2.resize(roi_img, None, fx=args.scale, fy=args.scale,
                                  interpolation=cv2.INTER_CUBIC)
         blocks = detect_frame_blocks(engine, roi_img, (rx0, ry0), args.scale,
-                                     cjk_only=not args.keep_non_cjk)
+                                     cjk_only=not args.keep_non_cjk, min_h=args.min_height * h,
+                                     min_chars=args.min_chars)
         samples.append((t, blocks))
 
         if args.debug_dir and processed % args.debug_every == 0:

@@ -52,6 +52,8 @@ Fps càng cao thì mốc thời gian càng sát (30fps khớp mẫu nhất) như
 | `--kf-tol` | Khung lệch quá số pixel này thì tính là chuyển động (mặc định 6) |
 | `--stable-sec` | Khung giữ yên ít nhất số giây này mới là khung ổn định chính (mặc định 0.5) |
 | `--min-frames` / `--max-gap-frames` | Lọc nhiễu / chịu được OCR chớp tắt |
+| `--min-height` | Chỉ lấy chữ cao ít nhất tỉ lệ này so với chiều cao video (mặc định 0.035 = 3.5%), bỏ chữ li ti trong bảng/giao diện; `0` = tắt |
+| `--min-chars` | Khối chữ phải có ít nhất ngần này chữ mới lấy (mặc định 2) |
 | `--pad` | Nở hộp đen ra mỗi phía = số này × chiều cao 1 dòng chữ, để che hết viền/bóng chữ (mặc định 0.25, `0` = tắt) |
 | `--join-gap` | 2 câu liên tiếp (cùng hàng) cách nhau ≤ số giây này thì nối đuôi câu trước vào đầu câu sau (mặc định 0.3, `0` = tắt) |
 | `--scale` | Phóng to vùng quét trước khi OCR (chữ nhỏ → tăng lên) |

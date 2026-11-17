@@ -35,7 +35,8 @@ PROMPT = (
     "Bạn là dịch giả phụ đề video. Dịch các câu phụ đề tiếng Trung dưới đây sang "
     "tiếng Việt tự nhiên, ngắn gọn, giữ đúng ý và giọng điệu. Các câu thuộc cùng một "
     "video và đang theo thứ tự thời gian, hãy dùng ngữ cảnh để dịch nhất quán. "
-    "Giữ nguyên số và tên riêng nếu không cần dịch. "
+    "Giữ nguyên số và tên riêng nếu không cần dịch. Tên người, địa danh, tổ chức "
+    "không có trong bảng tên (nếu có kèm theo) thì tự dịch/phiên âm tự nhiên như bình thường. "
     "Chỉ trả về một mảng JSON gồm các chuỗi, đúng {n} phần tử, đúng thứ tự, "
     "không thêm bất cứ thứ gì khác."
 )
@@ -43,6 +44,56 @@ PROMPT = (
 
 def log(msg):
     print(msg, flush=True)
+
+
+GLOSSARY = []  # [(trung, viet)], xep dai -> ngan
+
+
+def load_glossary():
+    """Doc bang ten Trung/Viet: cac muc cach nhau bang ';' hoac xuong dong, moi muc 'Trung/Viet'.
+    File: GLOSSARY_FILE hoac glossary.txt canh script. Khong co file thi bo qua."""
+    gf = os.environ.get("GLOSSARY_FILE") or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "glossary.txt")
+    if not os.path.isfile(gf):
+        return []
+    with open(gf, "r", encoding="utf-8-sig") as f:
+        raw = f.read()
+    seen, out = set(), []
+    for item in re.split(r"[;\r\n]+", raw):
+        if "/" not in item:
+            continue
+        zh, vi = (x.strip() for x in item.split("/", 1))
+        if zh and vi and zh not in seen:
+            seen.add(zh)
+            out.append((zh, vi))
+    out.sort(key=lambda x: -len(x[0]))
+    return out
+
+
+def matched_names(text):
+    """Cac muc bang ten xuat hien trong text. Muc ngan nam tron trong muc dai da khop thi bo
+    (vd 蒙德 trong 蒙德城)."""
+    found = []
+    masked = text
+    for zh, vi in GLOSSARY:
+        if zh in masked:
+            found.append((zh, vi))
+            masked = masked.replace(zh, "\0")
+    return found
+
+
+def glossary_block(texts):
+    found, seen = [], set()
+    for t in texts:
+        for zh, vi in matched_names(t):
+            if zh not in seen:
+                seen.add(zh)
+                found.append((zh, vi))
+    if not found:
+        return ""
+    return ("\n\nBảng tên riêng (khi các từ này xuất hiện với nghĩa là tên người/địa danh/tổ chức "
+            "thì BẮT BUỘC dùng đúng tên Việt bên phải, không tự đổi; nếu trong câu từ đó chỉ là từ thường "
+            "thì dịch bình thường):\n" + "\n".join("%s = %s" % x for x in found))
 
 
 class KeyPool:
@@ -112,8 +163,8 @@ def call_gemini(key, model, texts, timeout):
     body = {
         "contents": [{
             "role": "user",
-            "parts": [{"text": PROMPT.format(n=len(texts)) + "\n\n"
-                       + json.dumps(texts, ensure_ascii=False)}],
+            "parts": [{"text": PROMPT.format(n=len(texts)) + glossary_block(texts)
+                       + "\n\n" + json.dumps(texts, ensure_ascii=False)}],
         }],
         "generationConfig": {"temperature": 0.3, "responseMimeType": "application/json"},
     }
@@ -181,6 +232,25 @@ def translate_chunk(pool, model, texts, timeout, label=""):
         time.sleep(wait)
 
 
+def fix_names(pool, model, texts, outs, timeout, label=""):
+    """Cau goc co ten trong bang (>=2 chu) ma ban dich khong co ten Viet tuong ung -> dich lai
+    rieng cau do 1 lan; ban moi co du ten thi lay, khong thi giu ban dau."""
+    redo = []
+    for i, (zh, vi_out) in enumerate(zip(texts, outs)):
+        miss = [vi for z, vi in matched_names(zh) if len(z) >= 2 and vi.lower() not in vi_out.lower()]
+        if miss:
+            redo.append((i, miss))
+    for i, miss in redo:
+        try:
+            new = translate_chunk(pool, model, [texts[i]], timeout, label)[0]
+        except SystemExit:
+            raise
+        if all(vi.lower() in new.lower() for vi in miss):
+            log("   %sSua ten cau %d: %s" % (label, i + 1, ", ".join(miss)))
+            outs[i] = new
+    return outs
+
+
 def main():
     ap = argparse.ArgumentParser(description="Dich .srtpx Trung -> Viet bang Gemini")
     ap.add_argument("input", help="File .srtpx can dich")
@@ -195,6 +265,7 @@ def main():
     if not keys:
         sys.exit("[LOI] Chua co API key: dat secret/bien GEMINI_API_KEYS (moi dong 1 key) hoac file keys.txt")
     pool = KeyPool(keys)
+    GLOSSARY[:] = load_glossary()
 
     with open(args.input, "r", encoding="utf-8-sig", newline="") as f:
         original = f.read()
@@ -206,13 +277,16 @@ def main():
         t = " ".join(x.strip() for x in lines[s:e] if x.strip())
         if t and CJK_RE.search(t):
             todo.append((n, t))
-    log("[DICH] %d cau, model %s, %d key" % (len(todo), args.model, len(keys)))
+    log("[DICH] %d cau, model %s, %d key, %d ten trong bang" % (len(todo), args.model, len(keys), len(GLOSSARY)))
 
     translated = {}
     for k in range(0, len(todo), args.chunk):
         part = todo[k:k + args.chunk]
         label = "[%d-%d/%d] " % (k + 1, k + len(part), len(todo))
-        res = translate_chunk(pool, args.model, [t for _, t in part], args.timeout, label)
+        src = [t for _, t in part]
+        res = translate_chunk(pool, args.model, src, args.timeout, label)
+        if GLOSSARY:
+            res = fix_names(pool, args.model, src, res, args.timeout, label)
         for (n, _), vi in zip(part, res):
             translated[n] = vi
         log("   %sxong" % label)

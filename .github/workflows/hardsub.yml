@@ -22,7 +22,7 @@ on:
         default: ""
       fps:
         description: "So khung hinh/giay quet (nho = nhanh)"
-        default: "10"
+        default: "30"
       roi:
         description: "Vung quet x1,y1,x2,y2 (0,0,1.0,1.0 = toan khung hinh)"
         default: "0,0,1.0,1.0"
@@ -142,7 +142,7 @@ jobs:
           DRIVE_LINK: ${{ inputs.drive_link }}
           VIDEO_URL: ${{ inputs.video_url }}
           VIDEO_PATH: ${{ inputs.video_path }}
-          FPS: ${{ inputs.fps || '10' }}
+          FPS: ${{ inputs.fps || '30' }}
           ROI: ${{ inputs.roi || '0,0,1.0,1.0' }}
           LANG_CODE: ${{ inputs.lang || 'ch' }}
           TRANSLATE: ${{ github.event_name == 'workflow_dispatch' && inputs.translate == false && 'false' || 'true' }}

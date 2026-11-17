@@ -36,6 +36,10 @@ on:
       model:
         description: "Model Gemini dung de dich"
         default: "gemini-3.5-flash-lite"
+      retranslate:
+        description: "Dich LAI bang ban Trung da co (output/*.zh.srtpx) voi bang ten glossary.txt, KHONG boc lai video. De trong video_path = dich lai tat ca; hoac ghi vd in/tap1.mp4 de chi dich lai tap do"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -146,6 +150,7 @@ jobs:
           ROI: ${{ inputs.roi || '0,0,1.0,1.0' }}
           LANG_CODE: ${{ inputs.lang || 'ch' }}
           TRANSLATE: ${{ github.event_name == 'workflow_dispatch' && inputs.translate == false && 'false' || 'true' }}
+          RETRANSLATE: ${{ github.event_name == 'workflow_dispatch' && inputs.retranslate == true && 'true' || 'false' }}
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
           # Mac dinh gemini-3.5-flash-lite (bo qua bien repo GEMINI_MODEL cu de khoi dinh nham model da ngung)
           GEMINI_MODEL: ${{ inputs.model || 'gemini-3.5-flash-lite' }}
@@ -211,6 +216,51 @@ jobs:
               sleep "$wait_s"
             done
           }
+
+          # ---- 0. Che do DICH LAI: dung ban Trung da co + bang ten glossary.txt, khong boc lai video ----
+          if [ "$RETRANSLATE" = "true" ]; then
+            if [ -z "${GEMINI_API_KEYS:-}" ]; then
+              echo "::error::Dich lai can secret GEMINI_API_KEYS."
+              exit 1
+            fi
+            if [ -f glossary.txt ]; then
+              echo "Bang ten: glossary.txt ($(tr ';' '\n' < glossary.txt | grep -c '/') muc)"
+            else
+              echo "::warning::Khong thay glossary.txt -> dich khong co bang ten."
+            fi
+            shopt -s nullglob
+            if [ -n "$VIDEO_PATH" ]; then
+              RT_FILES=("output/$(basename "${VIDEO_PATH%.*}").zh.srtpx")
+            else
+              RT_FILES=(output/*.zh.srtpx)
+            fi
+            if [ "${#RT_FILES[@]}" -eq 0 ]; then
+              echo "Khong co ban Trung (output/*.zh.srtpx) de dich lai."
+              exit 0
+            fi
+            for zhsrc in "${RT_FILES[@]}"; do
+              if [ ! -f "$zhsrc" ]; then
+                echo "::error::Khong thay $zhsrc"
+                FAILED_TRANSLATE=1
+                continue
+              fi
+              NAME=$(basename "$zhsrc" .zh.srtpx)
+              echo "=============== Dich lai: $NAME ==============="
+              cp "$zhsrc" "work/$NAME.zh.srtpx"
+              if translate_with_retry "$NAME"; then
+                cp "out/$NAME.srtpx" "output/$NAME.srtpx"     # ban Viet moi (co bang ten)
+              else
+                # Dich that bai: giu nguyen ban Viet cu trong output/, khong ghi de, khong day len Drive
+                FAILED_TRANSLATE=1
+                rm -f "out/$NAME.srtpx"
+              fi
+            done
+            if [ "$FAILED_TRANSLATE" -eq 1 ]; then
+              echo "::error::Co video dich lai that bai (ban cu duoc giu nguyen)."
+              exit 1
+            fi
+            exit 0
+          fi
 
           # ---- 1. Lap danh sach video can boc ----
           if [ -n "$DRIVE_LINK" ]; then

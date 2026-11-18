@@ -355,20 +355,84 @@ def count_chars(text, cjk_only=True):
     return sum(1 for ch in text if ch.isalnum())
 
 
-def detect_frame_blocks(engine, roi_img, roi_offset, scale, cjk_only=True, min_h=0.0, min_chars=1):
+def tighten_box(gray, box, grow=0.15, thr_ratio=0.06, min_keep=0.5):
+    """Siet hop OCR (x_min, x_max, y_min, y_max) cho sat net chu that su trong anh gray.
+
+    Dem so diem canh (Canny) theo tung hang / cot trong hop: hang/cot o mep it canh (< thr_ratio x dinh)
+    la nen thua -> cat bo; mep nao con canh dam (chu bi hop OCR cat mat) -> mo rong ra toi da grow x be day chu.
+    An toan: khong tim thay chu, hoac hop moi < min_keep dien tich hop cu -> giu nguyen hop OCR."""
+    H, W = gray.shape[:2]
+    x1, x2, y1, y2 = box
+    ix1, ix2 = int(max(0, math.floor(x1))), int(min(W, math.ceil(x2)))
+    iy1, iy2 = int(max(0, math.floor(y1))), int(min(H, math.ceil(y2)))
+    if ix2 - ix1 < 4 or iy2 - iy1 < 4:
+        return tuple(box)
+    m = max(2, int(round(grow * min(ix2 - ix1, iy2 - iy1))))
+    wx1, wx2 = max(0, ix1 - m), min(W, ix2 + m)
+    wy1, wy2 = max(0, iy1 - m), min(H, iy2 + m)
+    edges = _edge_map(gray[wy1:wy2, wx1:wx2]).astype(np.int32)
+    bx1, bx2, by1, by2 = ix1 - wx1, ix2 - wx1, iy1 - wy1, iy2 - wy1
+
+    def span(proj, lo, hi):
+        peak = int(proj[lo:hi].max())
+        if peak <= 0:
+            return None
+        thr = max(2.0, thr_ratio * peak)
+        a, b = lo, hi
+        while a < b - 1 and proj[a] < thr:
+            a += 1
+        while b - 1 > a and proj[b - 1] < thr:
+            b -= 1
+        # canh dam nam ngoai hop OCR (trong le grow) -> chu bi hop cat mat (co the cat giua net chu) -> mo rong
+        out_lo = [i for i in range(0, lo) if proj[i] >= thr]
+        if out_lo:
+            a = min(a, out_lo[0])
+        out_hi = [i for i in range(hi, len(proj)) if proj[i] >= thr]
+        if out_hi:
+            b = max(b, out_hi[-1] + 1)
+        return a, b
+
+    s = span(edges[:, bx1:bx2].sum(axis=1), by1, by2)
+    if s is None:
+        return tuple(box)
+    cy1, cy2 = s
+    s = span(edges[cy1:cy2, :].sum(axis=0), bx1, bx2)
+    if s is None:
+        return tuple(box)
+    cx1, cx2 = s
+    if (cx2 - cx1) * (cy2 - cy1) < min_keep * (ix2 - ix1) * (iy2 - iy1):
+        return tuple(box)
+    return (float(wx1 + cx1), float(wx1 + cx2), float(wy1 + cy1), float(wy1 + cy2))
+
+
+def _axis_aligned(poly, tol_deg=2.0):
+    """Da giac 4 goc gan nhu thang truc (lech < tol_deg so voi ngang hoac doc)."""
+    if not poly or len(poly) < 2:
+        return True
+    ang = abs(math.degrees(math.atan2(poly[1][1] - poly[0][1], poly[1][0] - poly[0][0]))) % 90.0
+    return min(ang, 90.0 - ang) <= tol_deg
+
+
+def detect_frame_blocks(engine, roi_img, roi_offset, scale, cjk_only=True, min_h=0.0, min_chars=1,
+                        tighten=False):
     """OCR 1 frame da crop ROI -> list khoi chu, toa do quy ve khung hinh goc.
 
     Chi giu chu LON, ro (hien thi tren man hinh): bo o chu cao < min_h px (chu li ti trong bang/UI/watermark)
-    va bo khoi co it hon min_chars chu."""
+    va bo khoi co it hon min_chars chu. tighten=True: siet hop OCR theo net chu (tighten_box), chi cho chu thang."""
     ox, oy = roi_offset
+    gray = cv2.cvtColor(roi_img, cv2.COLOR_BGR2GRAY) if tighten and roi_img.ndim == 3 else None
     boxes = []
     for b in engine.detect(roi_img):
         y_min, y_max = b["y_min"] / scale + oy, b["y_max"] / scale + oy
         if y_max - y_min < min_h:
             continue
+        x_min, x_max = b["x_min"] / scale + ox, b["x_max"] / scale + ox
+        if gray is not None and _axis_aligned(b.get("poly")):
+            tx1, tx2, ty1, ty2 = tighten_box(gray, (b["x_min"], b["x_max"], b["y_min"], b["y_max"]))
+            x_min, x_max, y_min, y_max = tx1 / scale + ox, tx2 / scale + ox, ty1 / scale + oy, ty2 / scale + oy
         poly = [(q[0] / scale + ox, q[1] / scale + oy) for q in b["poly"]] if b.get("poly") else None
         boxes.append(dict(text=b["text"], conf=b["conf"],
-                          x_min=b["x_min"] / scale + ox, x_max=b["x_max"] / scale + ox,
+                          x_min=x_min, x_max=x_max,
                           y_min=y_min, y_max=y_max, poly=poly))
     blocks = build_blocks(boxes, cjk_only)
     return [bl for bl in blocks if count_chars(bl["text"], cjk_only) >= min_chars]
@@ -1095,6 +1159,9 @@ def main():
     ap.add_argument("--tilt", type=float, default=4.0,
                     help="Chu nghieng tu so do nay tro len thi thay hop den to bang chuoi hop nho doc theo duong cheo "
                          "(chi cho chu dung yen, can goc da giac cua OCR: paddleocr/easyocr), 0 = tat")
+    ap.add_argument("--no-tighten", action="store_true",
+                    help="Tat buoc siet hop OCR theo net chu that (mac dinh bat: cat nen thua o mep hop, "
+                         "mo rong neu chu bi cat; chi ap dung cho chu thang)")
     ap.add_argument("--no-refine", action="store_true",
                     help="Tat buoc tinh chinh moc bat dau/ket thuc theo tung khung hinh goc (mac dinh bat: lui moc dau "
                          "ve dung khung chu bat dau hien, tranh chu hien truoc roi 1 khung sau moi co hop den)")
@@ -1126,7 +1193,7 @@ def main():
                                  interpolation=cv2.INTER_CUBIC)
         blocks = detect_frame_blocks(engine, roi_img, (rx0, ry0), args.scale,
                                      cjk_only=not args.keep_non_cjk, min_h=args.min_height * h,
-                                     min_chars=args.min_chars)
+                                     min_chars=args.min_chars, tighten=not args.no_tighten)
         samples.append((t, blocks))
 
         if args.debug_dir and processed % args.debug_every == 0:

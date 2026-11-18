@@ -1090,7 +1090,7 @@ def main():
                     help="Khung giữ yên ít nhất số giây này mới coi là khung ổn định chính")
     ap.add_argument("--pad", type=float, default=0.05,
                     help="No hop den ra moi phia = so nay x chieu cao 1 dong chu, toi thieu 2px (mac dinh 0.05: hop sat chu), 0 = tat")
-    ap.add_argument("--join-gap", type=float, default=0.3,
+    ap.add_argument("--join-gap", type=float, default=0.5,
                     help="2 cau lien tiep cach nhau <= so giay nay thi noi duoi cau truoc vao dau cau sau, 0 = tat")
     ap.add_argument("--tilt", type=float, default=4.0,
                     help="Chu nghieng tu so do nay tro len thi thay hop den to bang chuoi hop nho doc theo duong cheo "

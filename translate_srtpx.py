@@ -256,7 +256,7 @@ def main():
     ap.add_argument("input", help="File .srtpx can dich")
     ap.add_argument("-o", "--output", help="File dau ra (mac dinh ghi de len file vao)")
     ap.add_argument("--keep-original", help="Luu ban chua dich vao duong dan nay")
-    ap.add_argument("--model", default=os.environ.get("GEMINI_MODEL", "gemini-hydrogen"))
+    ap.add_argument("--model", default=os.environ.get("GEMINI_MODEL", "gemini-4-hydrogen"))
     ap.add_argument("--chunk", type=int, default=40, help="So cau moi lan goi API")
     ap.add_argument("--timeout", type=int, default=120)
     args = ap.parse_args()

@@ -35,7 +35,7 @@ on:
         default: true
       model:
         description: "Model Gemini dung de dich"
-        default: "gemini-hydrogen"
+        default: "gemini-4-hydrogen"
       retranslate:
         description: "Dich LAI bang ban Trung da co (output/*.zh.srtpx) voi bang ten glossary.txt, KHONG boc lai video. De trong video_path = dich lai tat ca; hoac ghi vd in/tap1.mp4 de chi dich lai tap do"
         type: boolean
@@ -152,8 +152,8 @@ jobs:
           TRANSLATE: ${{ github.event_name == 'workflow_dispatch' && inputs.translate == false && 'false' || 'true' }}
           RETRANSLATE: ${{ github.event_name == 'workflow_dispatch' && inputs.retranslate == true && 'true' || 'false' }}
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
-          # Mac dinh gemini-hydrogen (bo qua bien repo GEMINI_MODEL cu de khoi dinh nham model da ngung)
-          GEMINI_MODEL: ${{ inputs.model || 'gemini-hydrogen' }}
+          # Mac dinh gemini-4-hydrogen (bo qua bien repo GEMINI_MODEL cu de khoi dinh nham model da ngung)
+          GEMINI_MODEL: ${{ inputs.model || 'gemini-4-hydrogen' }}
           # Tong thoi gian toi da de thu dich lai cho MOI video (phut) va thoi gian toi da moi lan thu (phut)
           TRANSLATE_MAX_MIN: "150"
           TRANSLATE_ATTEMPT_MIN: "30"

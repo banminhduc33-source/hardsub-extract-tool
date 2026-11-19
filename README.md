@@ -82,6 +82,6 @@ OCR chỉ chạy ở các khung lấy mẫu (`--fps 10` trên video 30fps = cứ
 
 ## Chữ nghiêng / chạy chéo
 
-- **Chữ nghiêng đứng yên** (mặc định `--tilt-mode quad`): xuất thêm dòng `Đa giác: x,y x,y x,y x,y` (4 góc thật: trên-trái, trên-phải, dưới-phải, dưới-trái). `srtpx_cover` vẽ hộp đen theo đa giác; `Độ rộng/Vị trí` vẫn là hộp thẳng nên bản cũ không hiểu dòng này vẫn che được.
+- **Chữ nghiêng đứng yên** (mặc định `--tilt-mode quad`, nghiêng từ `--tilt` 2° trở lên): xuất thêm dòng `Đa giác: x,y x,y x,y x,y` (4 góc thật: trên-trái, trên-phải, dưới-phải, dưới-trái). `srtpx_cover` vẽ hộp đen theo đa giác; `Độ rộng/Vị trí` vẫn là hộp thẳng nên bản cũ không hiểu dòng này vẫn che được.
 - **Chữ nghiêng/xoay + chuyển động** (có KF): mỗi dòng `KF` kèm 1 dòng `KP <giây>s: x,y x,y x,y x,y` (đa giác tại keyframe đó, nội suy giữa các keyframe); cần `srtpx_cover` có "Đa giác theo keyframe". Bản `srtpx_cover` cũ bỏ qua `KP` và che bằng hộp bao to hơn — dùng `--tilt-mode cover` nếu cần.
 - `--tilt-mode cover`: luôn dùng chuỗi hộp chữ nhật nhỏ (cho phần mềm đọc cũ). Test: `python demo/test_quad_output.py`.

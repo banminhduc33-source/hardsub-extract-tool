@@ -1166,8 +1166,74 @@ def _quad_bbox(q):
     return (min(q[0::2]), max(q[0::2]), min(q[1::2]), max(q[1::2]))
 
 
-def _tilt_quad_static(tr, main, tilt_deg, pad, width, height):
-    """Chu nghieng DUNG YEN (dung 1 da giac) -> 4 goc; khong thi None (dung chuoi hop che)."""
+FORCE_QUAD_MIN_DEG = 2.0    # che do poly_secondary: nghieng >= ngan nay (khi --tilt <= 0) thi lay da giac OCR, con lai lay hop da siet
+
+
+def _quad_geom(poly):
+    """Da giac 4 goc -> hinh binh hanh cho MOI dong chu (ke ca cot chu doc va chu ngan/vuong), khong gioi han goc.
+
+    Khac _tilt_geom: canh `a` la canh GAN NGANG nhat (|goc| <= 45 do, huong sang phai), canh `b` la canh con lai (huong xuong),
+    KHONG phu thuoc canh nao dai hon. Cot chu doc ("继续试炼" xep doc) thi `a` la canh ngan nam ngang, goc ~ 0 chu khong phai ~ 90:
+    thu tu 4 goc on dinh khi cot chu xoay qua phuong thang dung, va chu dich van nam ngang roi tu xuong dong theo cot.
+    None neu khong co du 4 diem hoac suy bien (canh < 1px)."""
+    if not poly or len(poly) != 4:
+        return None
+    (x0, y0), (x1, y1), (x2, y2), (x3, y3) = poly
+    e1 = ((x1 - x0) + (x2 - x3)) / 2, ((y1 - y0) + (y2 - y3)) / 2      # canh 0-1 va 3-2
+    e2 = ((x3 - x0) + (x2 - x1)) / 2, ((y3 - y0) + (y2 - y1)) / 2      # canh 0-3 va 1-2
+
+    def off_axis(e):                                                    # do lech cua canh so voi phuong ngang (0..90 do)
+        a = abs(math.atan2(e[1], e[0]))
+        return min(a, math.pi - a)
+
+    (ax, ay), (bx, by) = (e1, e2) if off_axis(e1) <= off_axis(e2) else (e2, e1)
+    L, t = math.hypot(ax, ay), math.hypot(bx, by)
+    if L < 1 or t < 1:
+        return None
+    if ax < 0 or (ax == 0 and ay < 0):
+        ax, ay = -ax, -ay
+    if by < 0 or (by == 0 and bx < 0):
+        bx, by = -bx, -by
+    return dict(cx=(x0 + x1 + x2 + x3) / 4, cy=(y0 + y1 + y2 + y3) / 4, ax=ax, ay=ay, bx=bx, by=by,
+                L=L, t=t, theta=math.degrees(math.atan2(ay, ax)))
+
+
+def _aabb_quad(box, pad=0.0, width=None, height=None):
+    """Hop thang (x1, x2, y1, y2) -> 4 goc (tren-trai, tren-phai, duoi-phai, duoi-trai), no `pad` px, kep trong khung hinh."""
+    x1, x2, y1, y2 = box
+    x1, x2, y1, y2 = x1 - pad, x2 + pad, y1 - pad, y2 + pad
+    if width is not None:
+        x1, x2 = min(max(x1, 0.0), float(width)), min(max(x2, 0.0), float(width))
+        y1, y2 = min(max(y1, 0.0), float(height)), min(max(y2, 0.0), float(height))
+    return tuple(round(v, 1) for v in (x1, y1, x2, y1, x2, y2, x1, y2))
+
+
+def _align_quad(q, ref):
+    """Xoay vong thu tu 4 goc cua q de khop nhat voi ref (tong binh phuong khoang cach nho nhat). Giu cac quad lien tiep cung
+    nhan goc, neu khong thi khi cot chu xoay qua 45 do hai quad ke nhau lech 1 nac va noi suy keyframe se vo/xoan hop."""
+    pts = [(q[i], q[i + 1]) for i in (0, 2, 4, 6)]
+    rp = [(ref[i], ref[i + 1]) for i in (0, 2, 4, 6)]
+    best = min(range(4), key=lambda s: sum((a - c) ** 2 + (b - d) ** 2
+                                           for (a, b), (c, d) in zip(pts[s:] + pts[:s], rp)))
+    pts = pts[best:] + pts[:best]
+    return tuple(v for pt in pts for v in pt)
+
+
+def _tilt_quad_static(tr, main, tilt_deg, pad, width, height, force=False):
+    """Chu nghieng DUNG YEN (dung 1 da giac) -> 4 goc; khong thi None (dung chuoi hop che).
+
+    force=True (phu de phu, xem format_srtpx): LUON tra ve 4 goc. Chu nghieng thi lay da giac OCR (moi goc, ke ca cot chu doc);
+    chu thang hoac khong dung duoc da giac thi lay 4 goc cua hop `main` da siet theo net chu."""
+    if force:
+        thr = tilt_deg if tilt_deg > 0 else FORCE_QUAD_MIN_DEG
+        g = None
+        if tr.polys:
+            idx = min(range(len(tr.frames)), key=lambda i: _boxdiff(tr.frames[i][1], main))
+            polys = tr.polys[idx]
+            g = _quad_geom(polys[0]) if len(polys) == 1 else None
+        if g is not None and abs(g["theta"]) >= thr:
+            return _quad_corners(g, pad, width, height)
+        return _aabb_quad(main, pad, width, height)
     if tilt_deg <= 0 or not tr.polys:
         return None
     idx = min(range(len(tr.frames)), key=lambda i: _boxdiff(tr.frames[i][1], main))
@@ -1178,15 +1244,40 @@ def _tilt_quad_static(tr, main, tilt_deg, pad, width, height):
     return _quad_corners(g, pad, width, height)
 
 
-def _tilt_quad_dynamic(tr, main, kfs, tilt_deg, pad, width, height):
-    """Chu nghieng/xoay + chuyen dong -> (4 goc chinh, [(t, 4 goc)]) khop moc kfs; None neu khong du da giac 1-khoi."""
-    if tilt_deg <= 0 or not tr.polys or not kfs:
-        return None
-    geoms = [_tilt_geom(pl[0]) if len(pl) == 1 else None for pl in tr.polys]
-    valid = [i for i, g in enumerate(geoms) if g is not None]
-    if len(valid) < max(2, 0.6 * len(geoms)) or not any(abs(geoms[i]["theta"]) >= tilt_deg for i in valid):
-        return None
-    quads = {i: _quad_corners(geoms[i], pad, width, height) for i in valid}
+def _force_quads(tr, tilt_deg, pad, width, height):
+    """Quad cho TUNG khung cua mot cau co chuyen dong (che do force): da giac OCR neu chu nghieng, khong thi 4 goc hop da siet.
+    Khung nao cung co quad (khong khung nao bi loai) va thu tu goc duoc noi tiep tu khung truoc (_align_quad)."""
+    thr = tilt_deg if tilt_deg > 0 else FORCE_QUAD_MIN_DEG
+    quads, prev = {}, None
+    for i, (_t, box) in enumerate(tr.frames):
+        pl = tr.polys[i] if i < len(tr.polys) else []
+        g = _quad_geom(pl[0]) if len(pl) == 1 else None
+        q = _quad_corners(g, pad, width, height) if g is not None and abs(g["theta"]) >= thr \
+            else _aabb_quad(box, pad, width, height)
+        if prev is not None:
+            q = _align_quad(q, prev)
+        quads[i] = prev = q
+    return quads
+
+
+def _tilt_quad_dynamic(tr, main, kfs, tilt_deg, pad, width, height, force=False):
+    """Chu nghieng/xoay + chuyen dong -> (4 goc chinh, [(t, 4 goc)]) khop moc kfs; None neu khong du da giac 1-khoi.
+
+    force=True (phu de phu): bo cac dieu kien tren (>= 60% khung dung duoc, co khung nghieng, goc <= 80 do): khung nao khong
+    dung duoc da giac thi dung 4 goc hop cua khung do. Chi tra None khi khong co keyframe."""
+    if force:
+        if not kfs:
+            return None
+        quads = _force_quads(tr, tilt_deg, pad, width, height)
+        valid = sorted(quads)
+    else:
+        if tilt_deg <= 0 or not tr.polys or not kfs:
+            return None
+        geoms = [_tilt_geom(pl[0]) if len(pl) == 1 else None for pl in tr.polys]
+        valid = [i for i, g in enumerate(geoms) if g is not None]
+        if len(valid) < max(2, 0.6 * len(geoms)) or not any(abs(geoms[i]["theta"]) >= tilt_deg for i in valid):
+            return None
+        quads = {i: _quad_corners(geoms[i], pad, width, height) for i in valid}
 
     def at(t):
         pos = valid.index(min(valid, key=lambda i: abs(tr.frames[i][0] - t)))
@@ -1201,9 +1292,13 @@ def _tilt_quad_dynamic(tr, main, kfs, tilt_deg, pad, width, height):
 
 def format_srtpx(tracks, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, med_win=5,
                  min_move_sec=0.1, report=False, move_tol=10.0, pad_ratio=0.0, join_gap=0.0, tilt_deg=0.0,
-                 tilt_mode="quad"):
+                 tilt_mode="quad", poly_secondary=False):
+    """poly_secondary=True (chi co tac dung o tilt_mode="quad"): MOI cau khong thuoc phu de chinh (main_lane_ids) deu xuat
+    da giac 4 goc ("Đa giác:" khi dung yen, "KP" tung keyframe khi chuyen dong), ke ca chu thang, cot chu doc, cau ngan.
+    Phu de chinh giu hop chu nhat den nhu cu. Mac dinh False de file xuat giong het ban cu (demo/test_format.py)."""
     tracks = sorted(tracks, key=lambda tr: (tr.start, tr.frames[0][1][2]))
     ends = join_ends(tracks, step_sec, join_gap)
+    main_ids = main_lane_ids(tracks, width, height) if poly_secondary and tilt_mode == "quad" else None
     entries = []
 
     def entry(text, start, end, box, kfs=(), quad=None, kps=()):
@@ -1234,20 +1329,23 @@ def format_srtpx(tracks, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, me
         padb = lambda b: pad_box(b, rh, pad_ratio, width, height)
         if tilt_mode == "quad":                     # 1 hop 4 goc thay cho chuoi hop che (can srtpx_cover moi doc duoc)
             pad_px = rh * pad_ratio
+            force = main_ids is not None and (n - 1) not in main_ids     # phu de phu: luon da giac
             if not kfs:
-                q = _tilt_quad_static(tr, main, tilt_deg, pad_px, width, height)
+                q = _tilt_quad_static(tr, main, tilt_deg, pad_px, width, height, force=force)
                 if q:
                     entry(tr.text(), tr.start, end_t, _quad_bbox(q), quad=q)
                     if report:
-                        print("      chu nghieng -> 1 hop 4 goc", file=sys.stderr)
+                        print("      phu de phu -> 1 hop 4 goc" if force else "      chu nghieng -> 1 hop 4 goc",
+                              file=sys.stderr)
                     continue
             else:
-                qd = _tilt_quad_dynamic(tr, main, kfs, tilt_deg, pad_px, width, height)
+                qd = _tilt_quad_dynamic(tr, main, kfs, tilt_deg, pad_px, width, height, force=force)
                 if qd:                              # chu nghieng/xoay + chuyen dong: 1 hop, da giac theo tung keyframe
                     mq, kq = qd
                     entry(tr.text(), tr.start, end_t, _quad_bbox(mq), [(t, _quad_bbox(q)) for t, q in kq], kps=kq)
                     if report:
-                        print(f"      chu xoay + dong -> 1 da giac, {len(kq)} KF", file=sys.stderr)
+                        print(f"      {'phu de phu' if force else 'chu xoay'} + dong -> 1 da giac, {len(kq)} KF",
+                              file=sys.stderr)
                     continue
         tilt = None if kfs else _tilt_for_track(tr, main, tilt_deg)
         if tilt:                                    # chu nghieng: hop chinh = dai ngang giua, them hop che doc duong cheo
@@ -1276,9 +1374,9 @@ def format_srtpx(tracks, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, me
 
 def write_srtpx(tracks, out_path, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, med_win=5,
                 min_move_sec=0.1, report=False, move_tol=10.0, pad_ratio=0.0, join_gap=0.0, tilt_deg=0.0,
-                tilt_mode="quad"):
+                tilt_mode="quad", poly_secondary=False):
     content = format_srtpx(tracks, width, height, step_sec, kf_tol, stable_sec, med_win, min_move_sec,
-                           report, move_tol, pad_ratio, join_gap, tilt_deg, tilt_mode)
+                           report, move_tol, pad_ratio, join_gap, tilt_deg, tilt_mode, poly_secondary)
     with open(out_path, "wb") as f:   # ghi nhi phan de giu dung CRLF tren moi he dieu hanh
         f.write(content.encode("utf-8"))
 
@@ -1357,6 +1455,10 @@ def main():
                     help="Chu nghieng: quad = dong 'Đa giác:' (dung yen) / 'KP' (chuyen dong), 4 goc that (can srtpx_cover moi); "
                          "cover = chuoi hop chu nhat nho doc duong cheo (phan mem doc cu). "
                          "Chu nghieng + chuyen dong: dong 'KP' (da giac theo keyframe)")
+    ap.add_argument("--no-poly-secondary", action="store_true",
+                    help="Tat che do 'moi phu de phu deu la da giac' (mac dinh bat, chi voi --tilt-mode quad): "
+                         "khi bat, moi cau KHONG thuoc phu de chinh deu xuat dong 'Đa giác:' / 'KP' (ke ca chu thang, cot chu doc, "
+                         "cau ngan); phu de chinh van la hop chu nhat den. Khi tat, chi chu nghieng moi la da giac")
     ap.add_argument("--tilt", type=float, default=2.0,
                     help="Chu nghieng tu so do nay tro len thi thay hop den to bang chuoi hop nho doc theo duong cheo "
                          "(chi cho chu dung yen, can goc da giac cua OCR: paddleocr/easyocr), 0 = tat")
@@ -1426,7 +1528,7 @@ def main():
         print(f"Tinh chinh moc thoi gian theo khung goc: doi {n_ref} moc", file=sys.stderr)
     write_srtpx(tracks, args.output, w, h, step_sec, args.kf_tol, args.stable_sec,
                 args.med_win, args.min_move_sec, args.report, args.move_tol,
-                args.pad, args.join_gap, args.tilt, args.tilt_mode)
+                args.pad, args.join_gap, args.tilt, args.tilt_mode, not args.no_poly_secondary)
     print(f"Xong: {len(tracks)} câu phụ đề -> {args.output}")
 
 

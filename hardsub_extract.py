@@ -1056,7 +1056,7 @@ def _tilt_quad_static(tr, main, tilt_deg, pad, width, height):
 
 
 def _tilt_quad_dynamic(tr, main, kfs, tilt_deg, pad, width, height):
-    """Chu nghieng/xoay + chuyen dong -> (4 goc chinh, [(t, 4 goc)]) khop moc kfs; None neu khong du da giac 1-khoi."""
+    """[Chua dung: srtpx_cover chua co da giac theo KF] Chu nghieng/xoay + chuyen dong -> (4 goc chinh, [(t, 4 goc)]) khop moc kfs; None neu khong du da giac 1-khoi."""
     if tilt_deg <= 0 or not tr.polys or not kfs:
         return None
     geoms = [_tilt_geom(pl[0]) if len(pl) == 1 else None for pl in tr.polys]
@@ -1083,7 +1083,7 @@ def format_srtpx(tracks, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, me
     ends = join_ends(tracks, step_sec, join_gap)
     entries = []
 
-    def entry(text, start, end, box, kfs=(), quad=None, kgs=()):
+    def entry(text, start, end, box, kfs=(), quad=None):
         lines = [
             str(len(entries) + 1),
             f"{seconds_to_srt_ts(start)} --> {seconds_to_srt_ts(end)}",
@@ -1091,13 +1091,10 @@ def format_srtpx(tracks, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, me
             f"Độ rộng: {_i(box[0])}px - {_i(box[1])}px",
             f"Vị trí: {_i(box[2])}px - {_i(box[3])}px",
         ]
-        if quad and not kfs:                        # hop 4 goc co dinh (srtpx_cover doc duoc dong "Goc:")
-            lines.append("Góc: " + " ".join(f"{v:g}" for v in quad))
-        kg = dict(kgs)
+        if quad and not kfs:                        # chu nghieng dung yen: srtpx_cover doc dong "Đa giác: x,y x,y x,y x,y"
+            lines.append("Đa giác: " + " ".join(f"{quad[i]:g},{quad[i + 1]:g}" for i in (0, 2, 4, 6)))
         for t, b in kfs:
             lines.append(f"KF {t:.2f}s: {_i(b[0])} {_i(b[1])} {_i(b[2])} {_i(b[3])}")
-            if t in kg:
-                lines.append(f"KG {t:.2f}s: " + " ".join(f"{v:g}" for v in kg[t]))
         entries.append("\r\n".join(lines))
 
     for n, tr in enumerate(tracks, start=1):
@@ -1117,14 +1114,7 @@ def format_srtpx(tracks, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, me
                     if report:
                         print("      chu nghieng -> 1 hop 4 goc", file=sys.stderr)
                     continue
-            else:
-                qd = _tilt_quad_dynamic(tr, main, kfs, tilt_deg, pad_px, width, height)
-                if qd:
-                    mq, kq = qd
-                    entry(tr.text(), tr.start, end_t, _quad_bbox(mq), [(t, _quad_bbox(q)) for t, q in kq], kgs=kq)
-                    if report:
-                        print(f"      chu xoay + dong -> 1 hop 4 goc, {len(kq)} KF", file=sys.stderr)
-                    continue
+            # chu nghieng + chuyen dong: srtpx_cover chua co da giac theo keyframe -> roi xuong chuoi hop che ben duoi
         tilt = None if kfs else _tilt_for_track(tr, main, tilt_deg)
         if tilt:                                    # chu nghieng: hop chinh = dai ngang giua, them hop che doc duong cheo
             band, covers = tilt
@@ -1230,8 +1220,9 @@ def main():
     ap.add_argument("--join-gap", type=float, default=0.5,
                     help="2 cau lien tiep cach nhau <= so giay nay thi noi duoi cau truoc vao dau cau sau, 0 = tat")
     ap.add_argument("--tilt-mode", choices=("quad", "cover"), default="quad",
-                    help="Chu nghieng: quad = 1 hop 4 goc (dong 'Góc:'/'KG', can srtpx_cover moi); "
-                         "cover = chuoi hop chu nhat nho doc duong cheo (phan mem doc cu)")
+                    help="Chu nghieng DUNG YEN: quad = dong 'Đa giác:' 4 goc that (can srtpx_cover moi); "
+                         "cover = chuoi hop chu nhat nho doc duong cheo (phan mem doc cu). "
+                         "Chu nghieng + chuyen dong luon dung chuoi hop che")
     ap.add_argument("--tilt", type=float, default=4.0,
                     help="Chu nghieng tu so do nay tro len thi thay hop den to bang chuoi hop nho doc theo duong cheo "
                          "(chi cho chu dung yen, can goc da giac cua OCR: paddleocr/easyocr), 0 = tat")

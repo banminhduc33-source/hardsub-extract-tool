@@ -89,6 +89,7 @@ OCR chỉ chạy ở các khung lấy mẫu (`--fps 10` trên video 30fps = cứ
 - **GitHub Actions**: vào Settings → Secrets and variables → Actions → New repository secret, tên `GEMINI_API_KEYS`, giá trị là các API key, **mỗi dòng một key**. Có secret này thì workflow tự dịch sau khi bóc (tắt bằng ô `translate` khi chạy tay). Bản tiếng Trung được giữ ở `output/<tên>.zh.srtpx`. Đổi model: tạo Variable `GEMINI_MODEL` (mặc định `gemini-4-hydrogen`).
 - **Trên máy**: tạo file `keys.txt` cạnh script (mỗi dòng một key, file này đã được git bỏ qua), rồi chạy `python translate_srtpx.py video.srtpx -o video_vi.srtpx --keep-original video.zh.srtpx`, hoặc tích ô "Dịch sang tiếng Việt" trong giao diện.
 - Key hết quota thì tự đổi sang key kế tiếp; key bị từ chối thì bị loại.
+- **Dịch cả file trong 1 lần gọi API** (mặc định `--chunk 0`), để model thấy toàn bộ video và dịch nhất quán. Nếu model trả sai định dạng hoặc quá thời gian (`--timeout`, mặc định 300 giây) thì tự chia đôi rồi dịch lại. Muốn dịch từng đợt thì đặt `--chunk N`.
 
 ## Kiểm tra
 

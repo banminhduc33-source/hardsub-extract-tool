@@ -602,9 +602,12 @@ def build_tracks(samples, step_sec, similarity=0.6, max_gap_frames=2,
         best, best_r = None, 0.0
         for prev in merged:
             gap = tr.start - (prev.last_t + step_sec)
-            if gap < -eps or gap > (max_gap_frames + 1) * step_sec + eps:
-                continue
             r = similar(prev.text(), tr.text())
+            max_gap = (max_gap_frames + 1) * step_sec
+            if r >= 0.95 and len(prev.text()) >= 4:     # cung 1 cau doc y het, OCR chi bi mat vai khung (chu phong to/hieu ung): noi qua khoang dut <= 0.6s
+                max_gap = max(max_gap, 0.6)
+            if gap < -eps or gap > max_gap + eps:
+                continue
             fragment = min(len(prev.frames), len(tr.frames)) < min_run
             if r >= merge_sim and (fragment or r >= split_sim) and r > best_r and _near(prev.frames[-1][1], tr.frames[0][1]):
                 best, best_r = prev, r
@@ -1234,7 +1237,7 @@ def main():
                     help="Chu nghieng: quad = dong 'Đa giác:' (dung yen) / 'KP' (chuyen dong), 4 goc that (can srtpx_cover moi); "
                          "cover = chuoi hop chu nhat nho doc duong cheo (phan mem doc cu). "
                          "Chu nghieng + chuyen dong: dong 'KP' (da giac theo keyframe)")
-    ap.add_argument("--tilt", type=float, default=4.0,
+    ap.add_argument("--tilt", type=float, default=2.0,
                     help="Chu nghieng tu so do nay tro len thi thay hop den to bang chuoi hop nho doc theo duong cheo "
                          "(chi cho chu dung yen, can goc da giac cua OCR: paddleocr/easyocr), 0 = tat")
     ap.add_argument("--no-tighten", action="store_true",

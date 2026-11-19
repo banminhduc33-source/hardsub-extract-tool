@@ -61,6 +61,16 @@ assert len(H.build_tracks(sm, step)) == 1
 sm = [(k * step, H.build_blocks([blk(A, (400, 900, 960, 1040)), blk(B, (400, 900, 100, 180))])) for k in range(10)]
 assert len(H.build_tracks(sm, step)) == 2
 
+# 1c) cung 1 cau doc y het bi OCR mat 0.4s giua chung (hieu ung phong to) -> 1 cau, khong tach doi
+C = "《退学但被保送》"
+sm = [(k * step, H.build_blocks([blk(C, (225, 1265, 804, 1037))])) for k in range(0, 10)] + \
+     [(k * step, H.build_blocks([blk(C, (228, 1268, 797, 1032))])) for k in range(14, 30)]
+assert len(H.build_tracks(sm, step)) == 1
+# nhung 2 cau KHAC nhau cach 0.4s van 2 cau
+sm = [(k * step, H.build_blocks([blk(C, (225, 1265, 804, 1037))])) for k in range(0, 10)] + \
+     [(k * step, H.build_blocks([blk("《留级但被劝退》", (228, 1268, 797, 1032))])) for k in range(14, 30)]
+assert len(H.build_tracks(sm, step)) == 2
+
 # 2) CHU DOC: 2 o cung cot -> 1 khoi theo thu tu tren->duoi; chu doc + chu ngang -> tach
 bs = H.build_blocks([blk("试炼统一考卷", (1022, 1124, 665, 1235)), blk("僭续", (1022, 1124, 469, 659))])
 assert len(bs) == 1 and bs[0]["text"] == "僭续试炼统一考卷" and bs[0]["bbox"] == (1022, 1124, 469, 1235), bs

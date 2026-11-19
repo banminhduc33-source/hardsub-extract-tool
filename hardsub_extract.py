@@ -841,6 +841,126 @@ def summarize(tr, step_sec, kf_tol=6.0, stable_sec=0.5, med_win=5, min_move_sec=
 
 
 # --------------------------------------------------------------------------
+# 4b) PHU DE PHU: CHU NHAY SANG CHO KHAC -> TACH BLOCK MOI (khong de KF truot cham)
+# --------------------------------------------------------------------------
+# summarize() chi them KF khi khung doi so voi KF truoc. Chu dung yen o A suot 2s roi NHAY sang B chi co 2 KF:
+# (t_dau_A, A) va (t_dau_B, B) -> srtpx_cover noi suy A -> B tren CA 2s ("truot cham" rat xau) du thuc te chu bien mat
+# o A va hien o B trong 1 khung. Chu that su nhay thi khong co chuyen dong de noi suy: tach thanh block moi bat dau
+# dung luc chu hien o cho moi. Chi ap dung cho PHU DE PHU (khong thuoc nhom cung vi tri dong nhat = phu de chinh).
+
+def _rest_box(tr):
+    """Khung luc nam yen: trung vi cua toi da 3 khung cuoi."""
+    return _median_box([b for _, b in tr.frames[-3:]])
+
+
+def main_lane_ids(tracks, width, height, tol_x=0.05, tol_y=0.025, min_group=2):
+    """Chi so (trong `tracks`) cua cac cau thuoc PHU DE CHINH = nhom cau cung vi tri DONG NHAT (cung luat voi
+    srtpx_cover/core/maincap.py): gom theo tam khung (dung sai 5% rong, 2,5% cao khung hinh), nhom dong nhat thang
+    (hoa: tong thoi luong dai hon, roi nam thap hon), roi ket nap khung nam tron trong vung bao cua nhom.
+    Nhom it hon `min_group` cau -> khong co phu de chinh -> tra ve tap rong."""
+    if not tracks:
+        return set()
+    boxes = [_rest_box(tr) for tr in tracks]
+    pts = [((b[0] + b[1]) / 2, (b[2] + b[3]) / 2) for b in boxes]
+    dur = [max(0.0, tr.last_t - tr.start) for tr in tracks]
+    tx, ty = width * tol_x, height * tol_y
+
+    def around(cx, cy):
+        return [j for j, (x, y) in enumerate(pts) if abs(x - cx) <= tx and abs(y - cy) <= ty]
+
+    best, best_key = [], None
+    for cx, cy in pts:
+        members = around(cx, cy)
+        key = (len(members), sum(dur[j] for j in members), cy)
+        if best_key is None or key > best_key:
+            best_key, best = key, members
+    for _ in range(5):                                    # doi tam ve trung binh nhom cho khoi phu thuoc cau chon dau
+        nxt = around(sum(pts[j][0] for j in best) / len(best), sum(pts[j][1] for j in best) / len(best))
+        if nxt == best or len(nxt) < len(best):
+            break
+        best = nxt
+    gx1, gx2 = min(boxes[j][0] for j in best), max(boxes[j][1] for j in best)
+    gy1, gy2 = min(boxes[j][2] for j in best), max(boxes[j][3] for j in best)
+    inside = {j for j, b in enumerate(boxes) if b[0] >= gx1 and b[1] <= gx2 and b[2] >= gy1 and b[3] <= gy2}
+    group = set(best) | inside
+    return group if len(group) >= min_group else set()
+
+
+def _translated(a, b, px):
+    """b lech khoi a >= px o CA HAI mep ngang hoac CA HAI mep doc (chu doi cho). Chi 1 mep doi = chu dai ra/ngan di,
+    khong phai nhay cho."""
+    return ((abs(b[0] - a[0]) >= px and abs(b[1] - a[1]) >= px) or
+            (abs(b[2] - a[2]) >= px and abs(b[3] - a[3]) >= px))
+
+
+def split_jumps(tr, height, jump_rows=2.0, jump_speed=0.5, min_len=2):
+    """Tach 1 track thanh nhieu track tai cac cho chu NHAY sang vi tri khac (danh sach 1 phan tu neu khong nhay).
+
+    Nhay = giua 2 khung lay mau lien tiep, chu doi cho >= jump_rows x chieu cao 1 dong chu (toi thieu 5% chieu cao
+    khung hinh) VA nhanh hon jump_speed chieu cao khung hinh / giay. Chuyen dong that (truot/bay vao) cham hon nhieu
+    nen khong bi tach. Doan qua ngan (< min_len khung, vd OCR do lech 1 khung roi ve cho cu) khong tinh la 1 vi tri
+    moi: nhap vao doan ke gan hon, 2 doan ke nhau o cung cho thi nhap lai."""
+    n = len(tr.frames)
+    if n < 2 * min_len:
+        return [tr]
+    px = max(jump_rows * tr.row_h(), 0.05 * height)
+    cuts = []
+    for i in range(1, n):
+        (t0, b0), (t1, b1) = tr.frames[i - 1], tr.frames[i]
+        if _translated(b0, b1, px) and _boxdiff(b0, b1) / max(t1 - t0, 1e-6) >= jump_speed * height:
+            cuts.append(i)
+    if not cuts:
+        return [tr]
+    segs = list(zip([0] + cuts, cuts + [n]))
+
+    def rep(s):
+        return _median_box([b for _, b in tr.frames[s[0]:s[1]]])
+
+    while len(segs) > 1:
+        reps = [rep(s) for s in segs]
+        k = next((k for k, s in enumerate(segs) if s[1] - s[0] < min_len), None)
+        if k is not None:                                 # doan qua ngan: nhap vao ben gan hon (dau/cuoi track: ben con lai)
+            if k == 0:
+                j = 1
+            elif k == len(segs) - 1:
+                j = k - 1
+            else:
+                j = k - 1 if _boxdiff(reps[k], reps[k - 1]) <= _boxdiff(reps[k], reps[k + 1]) else k + 1
+        else:
+            k = next((k for k in range(len(segs) - 1) if not _translated(reps[k], reps[k + 1], px)), None)
+            if k is None:
+                break
+            j = k + 1
+        a, b = min(k, j), max(k, j)
+        segs[a:b + 1] = [(segs[a][0], segs[b][1])]
+    if len(segs) == 1:
+        return [tr]
+    out = [tr.slice(a, b) for a, b in segs]
+    out[0].refined_start = tr.refined_start
+    out[-1].refined_end = tr.refined_end
+    return out
+
+
+def split_jumpy_tracks(tracks, width, height, jump_rows=2.0, jump_speed=0.5, min_move_sec=0.1, step_sec=0.1,
+                       report=False):
+    """Ap dung split_jumps cho cac cau PHU (khong thuoc nhom phu de chinh). Tra ve (tracks_moi, so_cho_tach).
+    Khong tim ra nhom chinh (it hon 2 cau cung vi tri) thi coi moi cau deu la phu."""
+    if not tracks or jump_rows <= 0:
+        return list(tracks), 0
+    main = main_lane_ids(tracks, width, height)
+    min_len = max(2, round(min_move_sec / step_sec))
+    out, cuts = [], 0
+    for i, tr in enumerate(tracks):
+        parts = [tr] if i in main else split_jumps(tr, height, jump_rows, jump_speed, min_len)
+        if len(parts) > 1:
+            cuts += len(parts) - 1
+            if report:
+                print(f"      '{tr.text()[:12]}' nhay cho {len(parts) - 1} lan -> tach {len(parts)} block", file=sys.stderr)
+        out.extend(parts)
+    return out, cuts
+
+
+# --------------------------------------------------------------------------
 # 5) GHI FILE .srtpx
 # --------------------------------------------------------------------------
 
@@ -1248,6 +1368,15 @@ def main():
                          "ve dung khung chu bat dau hien, tranh chu hien truoc roi 1 khung sau moi co hop den)")
     ap.add_argument("--refine-reach", type=int, default=None,
                     help="So khung goc toi da xet lui/toi moi dau cau khi tinh chinh (mac dinh max(buoc lay mau, 4))")
+    ap.add_argument("--no-split-jumps", action="store_true",
+                    help="Tắt bước tách block khi chữ phụ NHẢY sang chỗ khác (mặc định bật: chữ nhảy thì tạo block mới "
+                         "đúng chỗ nó nhảy tới thay vì để KF trượt chậm qua đó). Chỉ áp dụng cho phụ đề phụ")
+    ap.add_argument("--jump-rows", type=float, default=2.0,
+                    help="Chữ đổi chỗ từ ngần này lần chiều cao 1 dòng chữ (tối thiểu 5%% chiều cao khung hình) giữa 2 "
+                         "khung lấy mẫu liền nhau mới tính là nhảy; 0 = tắt bước tách")
+    ap.add_argument("--jump-speed", type=float, default=0.5,
+                    help="... và phải nhanh hơn ngần này chiều cao khung hình mỗi giây (chữ trượt/bay vào chậm hơn nhiều "
+                         "nên không bị tách)")
     ap.add_argument("--debug-dir", default=None, help="Thư mục lưu ảnh debug đã kẻ khung")
     ap.add_argument("--debug-every", type=int, default=15, help="Lưu debug mỗi N frame đã xử lý")
     args = ap.parse_args()
@@ -1287,6 +1416,11 @@ def main():
     tracks = build_tracks(samples, step_sec, similarity=args.similarity,
                           max_gap_frames=args.max_gap_frames, min_frames=args.min_frames,
                           merge_sim=args.merge_sim, split_sim=args.split_sim, min_run_sec=args.min_run_sec)
+    if not args.no_split_jumps:
+        # Tach TRUOC refine_edges: moi doan sau khi tach la 1 cau dung yen rieng, duoc tinh chinh moc nhu cau thuong.
+        tracks, n_cut = split_jumpy_tracks(tracks, w, h, args.jump_rows, args.jump_speed, args.min_move_sec,
+                                           step_sec, args.report)
+        print(f"Tach block khi chu phu nhay cho: {n_cut} cho", file=sys.stderr)
     if not args.no_refine:
         n_ref = refine_edges(args.video, tracks, info["native_fps"], info["step"], w, h, reach=args.refine_reach)
         print(f"Tinh chinh moc thoi gian theo khung goc: doi {n_ref} moc", file=sys.stderr)

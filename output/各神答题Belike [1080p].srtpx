@@ -2,118 +2,127 @@
 
 1
 00:00:00,000 --> 00:00:07,767
-Các vị thần làm bài kiểu:
+Kiểu làm bài của các vị thần
 Độ rộng: 417px - 1025px
 Vị trí: 41px - 168px
 
 2
 00:00:00,000 --> 00:00:02,000
-*Làm bài chăm chỉ
+Làm bài chăm chỉ
 Độ rộng: 1003px - 1290px
 Vị trí: 173px - 245px
 
 3
 00:00:00,000 --> 00:00:02,000
-*Giám thị phòng thi
+Giám thị phòng thi
 Độ rộng: 147px - 344px
 Vị trí: 398px - 472px
 
 4
 00:00:00,000 --> 00:00:02,000
-*Vận động bộ não cuối cùng cũng tính ra đáp án
+Vận dụng não bộ suy luận đáp án cuối cùng
 Độ rộng: 380px - 1061px
 Vị trí: 964px - 1044px
 
 5
 00:00:02,000 --> 00:00:04,700
-*Đi muộn 7 phút nhưng vẫn tiếp tục làm bài
+Đi muộn 7 phút nhưng vẫn tiếp tục làm bài
 Độ rộng: 845px - 1360px
 Vị trí: 177px - 257px
 
 6
 00:00:02,733 --> 00:00:04,300
-*Xin lỗi nha, đi đón 7 người
+Xin lỗi nhé, đi đón 7 người
 Độ rộng: 411px - 1024px
 Vị trí: 960px - 1044px
 
 7
 00:00:04,700 --> 00:00:06,367
-*Vừa làm bài vừa nghi ngờ
+Vừa làm bài vừa nghi ngờ
 Độ rộng: 842px - 1360px
 Vị trí: 179px - 246px
 
 8
 00:00:05,033 --> 00:00:06,367
-*Đề thi này có vấn đề
+Đề thi này có vấn đề
 Độ rộng: 478px - 960px
 Vị trí: 960px - 1044px
 
 9
 00:00:06,367 --> 00:00:09,000
-*Vừa làm bài vừa chửi
+Vừa làm bài vừa chửi
 Độ rộng: 876px - 1321px
 Vị trí: 238px - 306px
 
 10
 00:00:06,367 --> 00:00:09,000
-*Tôi có đáp án điểm tuyệt đối nhưng tôi phải chửi bạn
+Tôi có đáp án điểm tuyệt đối nhưng tôi phải chửi bạn
 Độ rộng: 311px - 1131px
 Vị trí: 960px - 1045px
 
 11
 00:00:07,767 --> 00:00:09,000
-*Tiếp tục thử thách, đề thi chung
+Tiếp tục thử thách, đề thi chung
 Độ rộng: 394px - 1044px
 Vị trí: 124px - 224px
 
 12
 00:00:09,000 --> 00:00:21,767
-Các vị thần làm bài kiểu:
+Kiểu làm bài của các vị thần
 Độ rộng: 417px - 1025px
 Vị trí: 42px - 158px
 
 13
 00:00:09,000 --> 00:00:11,167
-*Xé luôn tờ giấy thi
+Xé luôn đề thi
 Độ rộng: 917px - 1301px
 Vị trí: 178px - 246px
 
 14
 00:00:09,000 --> 00:00:10,633
-*Lắm quy tắc thế không biết
+Lắm quy củ thế không biết
 Độ rộng: 440px - 1004px
 Vị trí: 960px - 1044px
 
 15
 00:00:09,033 --> 00:00:09,500
-*Tiếp tục thử thách
+Tiếp tục thử thách
 Độ rộng: 930px - 1001px
 Vị trí: 529px - 806px
 
 16
 00:00:10,633 --> 00:00:10,767
-*Thử thách
+Thử thách
 Độ rộng: 871px - 968px
 Vị trí: 597px - 819px
 
 17
 00:00:11,167 --> 00:00:16,167
-*Hoàn thành bài thi
-Độ rộng: 974px - 1243px
-Vị trí: 178px - 246px
-KF 11.17s: 974 1243 178 246
-KF 13.10s: 974 1243 178 256
-KF 13.13s: 974 1243 178 246
-KF 14.17s: 965 1243 178 264
+Hoàn thành bài thi
+Độ rộng: 968px - 1249px
+Vị trí: 169px - 255px
+KF 11.17s: 968 1249 169 255
+KP 11.17s: 970.5,169.4 1248.7,178.4 1246.5,255.3 968.3,246.4
+KF 13.10s: 968 1247 171 254
+KP 13.10s: 969.9,171.3 1247.2,176.9 1245.6,253.7 968.3,248.1
+KF 13.13s: 968 1247 171 254
+KP 13.13s: 969.9,171.3 1247.2,176.9 1245.6,253.7 968.3,248.1
+KF 14.17s: 967 1251 170 257
+KP 14.17s: 968.4,169.8 1250.7,177.5 1247.5,256.7 966.8,249.5
 KF 14.20s: 965 1251 166 259
-KF 14.73s: 974 1243 178 246
+KP 14.20s: 968,166.3 1250.7,177.5 1247.5,258.7 964.8,247.5
+KF 14.73s: 968 1249 169 255
+KP 14.73s: 970.5,169.4 1248.7,178.4 1246.5,255.3 968.3,246.4
 KF 14.97s: 965 1251 166 259
-KF 15.07s: 974 1243 177 246
-KF 16.17s: 974 1243 177 246
+KP 14.97s: 968,166.3 1250.7,177.5 1247.5,258.7 964.8,247.5
+KF 15.07s: 967 1249 169 255
+KP 15.07s: 969,169.4 1248.7,178.4 1246.5,255.3 966.8,246.4
+KF 16.17s: 967 1249 169 255
+KP 16.17s: 969,169.4 1248.7,178.4 1246.5,255.3 966.8,246.4
 
 18
 00:00:11,767 --> 00:00:14,067
-*Tiếp tục thử thách
+Tiếp tục thử thách
 Độ rộng: 711px - 885px
 Vị trí: 650px - 784px
 KF 11.77s: 711 885 650 784
@@ -152,48 +161,43 @@ KF 14.07s: 735 826 480 777
 
 19
 00:00:12,800 --> 00:00:14,067
-*Gì cơ, còn đề thi nữa á?
+Gì cơ, lại còn câu hỏi nữa à?
 Độ rộng: 468px - 939px
 Vị trí: 952px - 1065px
 
 20
 00:00:14,200 --> 00:00:14,767
-*Tiếp tục thử thách, đề thi chung
+Tiếp tục thử thách, đề thi chung
 Độ rộng: 394px - 1056px
 Vị trí: 195px - 311px
 
 21
 00:00:14,667 --> 00:00:16,167
-*Tiếp tục thử thách
+Tiếp tục thử thách
 Độ rộng: 1030px - 1115px
 Vị trí: 477px - 728px
 
 22
 00:00:14,667 --> 00:00:16,433
-*Đang yên đang lành lễ tết lại thi cử cái gì
+Ngày lễ ngày tết mà còn bắt thi cử gì
 Độ rộng: 412px - 1000px
 Vị trí: 949px - 1064px
 
 23
 00:00:16,433 --> 00:00:18,267
-*Hỏng rồi, quên đăng ký rồi
+Chết rồi, quên đăng ký dự thi rồi
 Độ rộng: 477px - 936px
 Vị trí: 965px - 1044px
 
 24
 00:00:18,267 --> 00:00:19,900
-*Không đúng, tôi đã hủy học tịch rồi
+Không đúng, tôi đã hủy học tịch rồi
 Độ rộng: 449px - 996px
 Vị trí: 958px - 1053px
 
 25
-00:00:19,900 --> 00:00:20,200
-《Nghỉ học nhưng được tuyển thẳng》
-Độ rộng: 228px - 1268px
-Vị trí: 797px - 1032px
-
-26
-00:00:20,200 --> 00:00:21,767
-《Nghỉ học nhưng được tuyển thẳng》
-Độ rộng: 225px - 1265px
+00:00:19,900 --> 00:00:21,767
+"Nghỉ học nhưng được tuyển thẳng"
+Độ rộng: 224px - 1266px
 Vị trí: 804px - 1037px
+Đa giác: 223.8,875.2 1254.8,803.7 1265.7,965.8 234.7,1037.3

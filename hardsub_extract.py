@@ -1027,13 +1027,63 @@ def _tilt_dynamic(tr, main, kfs, tilt_deg):
     return flat[idx], [(t, at(t)) for t, _ in kfs]
 
 
+def _quad_corners(g, pad=0.0, width=None, height=None):
+    """4 goc (ax ay bx by cx cy dx dy: tren-trai, tren-phai, duoi-phai, duoi-trai) cua dong chu nghieng g, no ra `pad` px
+    moi phia theo huong dong chu / be day, kep trong khung hinh neu biet kich thuoc."""
+    ka, kb = (g["L"] + 2 * pad) / g["L"], (g["t"] + 2 * pad) / g["t"]
+    ax, ay, bx, by = g["ax"] * ka, g["ay"] * ka, g["bx"] * kb, g["by"] * kb
+    pts = [(g["cx"] + sa * ax / 2 + sb * bx / 2, g["cy"] + sa * ay / 2 + sb * by / 2)
+           for sa, sb in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+    if width is not None:
+        pts = [(min(max(x, 0.0), float(width)), min(max(y, 0.0), float(height))) for x, y in pts]
+    return tuple(round(v, 1) for pt in pts for v in pt)
+
+
+def _quad_bbox(q):
+    return (min(q[0::2]), max(q[0::2]), min(q[1::2]), max(q[1::2]))
+
+
+def _tilt_quad_static(tr, main, tilt_deg, pad, width, height):
+    """Chu nghieng DUNG YEN (dung 1 da giac) -> 4 goc; khong thi None (dung chuoi hop che)."""
+    if tilt_deg <= 0 or not tr.polys:
+        return None
+    idx = min(range(len(tr.frames)), key=lambda i: _boxdiff(tr.frames[i][1], main))
+    polys = tr.polys[idx]
+    g = _tilt_geom(polys[0]) if len(polys) == 1 else None
+    if g is None or abs(g["theta"]) < tilt_deg:
+        return None
+    return _quad_corners(g, pad, width, height)
+
+
+def _tilt_quad_dynamic(tr, main, kfs, tilt_deg, pad, width, height):
+    """Chu nghieng/xoay + chuyen dong -> (4 goc chinh, [(t, 4 goc)]) khop moc kfs; None neu khong du da giac 1-khoi."""
+    if tilt_deg <= 0 or not tr.polys or not kfs:
+        return None
+    geoms = [_tilt_geom(pl[0]) if len(pl) == 1 else None for pl in tr.polys]
+    valid = [i for i, g in enumerate(geoms) if g is not None]
+    if len(valid) < max(2, 0.6 * len(geoms)) or not any(abs(geoms[i]["theta"]) >= tilt_deg for i in valid):
+        return None
+    quads = {i: _quad_corners(geoms[i], pad, width, height) for i in valid}
+
+    def at(t):
+        pos = valid.index(min(valid, key=lambda i: abs(tr.frames[i][0] - t)))
+        if pos == 0 or pos == len(valid) - 1:
+            return quads[valid[pos]]
+        near = [quads[valid[q]] for q in (pos - 1, pos, pos + 1)]
+        return tuple(round(statistics.median(n[d] for n in near), 1) for d in range(8))
+
+    idx = min(valid, key=lambda i: _boxdiff(tr.frames[i][1], main))
+    return quads[idx], [(t, at(t)) for t, _ in kfs]
+
+
 def format_srtpx(tracks, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, med_win=5,
-                 min_move_sec=0.1, report=False, move_tol=10.0, pad_ratio=0.0, join_gap=0.0, tilt_deg=0.0):
+                 min_move_sec=0.1, report=False, move_tol=10.0, pad_ratio=0.0, join_gap=0.0, tilt_deg=0.0,
+                 tilt_mode="quad"):
     tracks = sorted(tracks, key=lambda tr: (tr.start, tr.frames[0][1][2]))
     ends = join_ends(tracks, step_sec, join_gap)
     entries = []
 
-    def entry(text, start, end, box, kfs=()):
+    def entry(text, start, end, box, kfs=(), quad=None, kgs=()):
         lines = [
             str(len(entries) + 1),
             f"{seconds_to_srt_ts(start)} --> {seconds_to_srt_ts(end)}",
@@ -1041,8 +1091,13 @@ def format_srtpx(tracks, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, me
             f"Độ rộng: {_i(box[0])}px - {_i(box[1])}px",
             f"Vị trí: {_i(box[2])}px - {_i(box[3])}px",
         ]
+        if quad and not kfs:                        # hop 4 goc co dinh (srtpx_cover doc duoc dong "Goc:")
+            lines.append("Góc: " + " ".join(f"{v:g}" for v in quad))
+        kg = dict(kgs)
         for t, b in kfs:
             lines.append(f"KF {t:.2f}s: {_i(b[0])} {_i(b[1])} {_i(b[2])} {_i(b[3])}")
+            if t in kg:
+                lines.append(f"KG {t:.2f}s: " + " ".join(f"{v:g}" for v in kg[t]))
         entries.append("\r\n".join(lines))
 
     for n, tr in enumerate(tracks, start=1):
@@ -1053,6 +1108,23 @@ def format_srtpx(tracks, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, me
                   file=sys.stderr)
         rh = tr.row_h()
         padb = lambda b: pad_box(b, rh, pad_ratio, width, height)
+        if tilt_mode == "quad":                     # 1 hop 4 goc thay cho chuoi hop che (can srtpx_cover moi doc duoc)
+            pad_px = rh * pad_ratio
+            if not kfs:
+                q = _tilt_quad_static(tr, main, tilt_deg, pad_px, width, height)
+                if q:
+                    entry(tr.text(), tr.start, end_t, _quad_bbox(q), quad=q)
+                    if report:
+                        print("      chu nghieng -> 1 hop 4 goc", file=sys.stderr)
+                    continue
+            else:
+                qd = _tilt_quad_dynamic(tr, main, kfs, tilt_deg, pad_px, width, height)
+                if qd:
+                    mq, kq = qd
+                    entry(tr.text(), tr.start, end_t, _quad_bbox(mq), [(t, _quad_bbox(q)) for t, q in kq], kgs=kq)
+                    if report:
+                        print(f"      chu xoay + dong -> 1 hop 4 goc, {len(kq)} KF", file=sys.stderr)
+                    continue
         tilt = None if kfs else _tilt_for_track(tr, main, tilt_deg)
         if tilt:                                    # chu nghieng: hop chinh = dai ngang giua, them hop che doc duong cheo
             band, covers = tilt
@@ -1079,9 +1151,10 @@ def format_srtpx(tracks, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, me
 
 
 def write_srtpx(tracks, out_path, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, med_win=5,
-                min_move_sec=0.1, report=False, move_tol=10.0, pad_ratio=0.0, join_gap=0.0, tilt_deg=0.0):
+                min_move_sec=0.1, report=False, move_tol=10.0, pad_ratio=0.0, join_gap=0.0, tilt_deg=0.0,
+                tilt_mode="quad"):
     content = format_srtpx(tracks, width, height, step_sec, kf_tol, stable_sec, med_win, min_move_sec,
-                           report, move_tol, pad_ratio, join_gap, tilt_deg)
+                           report, move_tol, pad_ratio, join_gap, tilt_deg, tilt_mode)
     with open(out_path, "wb") as f:   # ghi nhi phan de giu dung CRLF tren moi he dieu hanh
         f.write(content.encode("utf-8"))
 
@@ -1156,6 +1229,9 @@ def main():
                     help="No hop den ra moi phia = so nay x chieu cao 1 dong chu, toi thieu 2px (mac dinh 0.05: hop sat chu), 0 = tat")
     ap.add_argument("--join-gap", type=float, default=0.5,
                     help="2 cau lien tiep cach nhau <= so giay nay thi noi duoi cau truoc vao dau cau sau, 0 = tat")
+    ap.add_argument("--tilt-mode", choices=("quad", "cover"), default="quad",
+                    help="Chu nghieng: quad = 1 hop 4 goc (dong 'Góc:'/'KG', can srtpx_cover moi); "
+                         "cover = chuoi hop chu nhat nho doc duong cheo (phan mem doc cu)")
     ap.add_argument("--tilt", type=float, default=4.0,
                     help="Chu nghieng tu so do nay tro len thi thay hop den to bang chuoi hop nho doc theo duong cheo "
                          "(chi cho chu dung yen, can goc da giac cua OCR: paddleocr/easyocr), 0 = tat")
@@ -1211,7 +1287,7 @@ def main():
         print(f"Tinh chinh moc thoi gian theo khung goc: doi {n_ref} moc", file=sys.stderr)
     write_srtpx(tracks, args.output, w, h, step_sec, args.kf_tol, args.stable_sec,
                 args.med_win, args.min_move_sec, args.report, args.move_tol,
-                args.pad, args.join_gap, args.tilt)
+                args.pad, args.join_gap, args.tilt, args.tilt_mode)
     print(f"Xong: {len(tracks)} câu phụ đề -> {args.output}")
 
 

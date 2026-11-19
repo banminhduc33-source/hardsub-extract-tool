@@ -31,7 +31,7 @@ def run(poly, tilt):
     for k in range(60):
         samples.append((k * step, H.detect_frame_blocks(eng, None, (0, 0), 1.0, True, min_h=0, min_chars=2)))
     tr = H.build_tracks(samples, step)
-    out = H.format_srtpx(tr, 1440, 1080, step, pad_ratio=0.0, tilt_deg=tilt)
+    out = H.format_srtpx(tr, 1440, 1080, step, pad_ratio=0.0, tilt_deg=tilt, tilt_mode="cover")
     lines = out.split("\r\n")
     ents, i = [], 0
     while i < len(lines):

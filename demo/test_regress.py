@@ -70,8 +70,8 @@ assert len(H.build_blocks([blk("僭续试炼", (1022, 1124, 469, 900)), blk("什
 poly_at = lambda k: poly_of(700 + k * 10, 600, 600, 80, 10 + k * 2)       # 10 -> 48 do
 sm = [(k * step, H.build_blocks([blk("僭续试炼统一考卷", bbox(poly_at(k)), poly_at(k))])) for k in range(20)]
 tr = H.build_tracks(sm, step)
-off = parse(H.format_srtpx(tr, 1440, 1080, step, tilt_deg=0))
-on = parse(H.format_srtpx(tr, 1440, 1080, step, tilt_deg=4))
+off = parse(H.format_srtpx(tr, 1440, 1080, step, tilt_deg=0, tilt_mode="cover"))
+on = parse(H.format_srtpx(tr, 1440, 1080, step, tilt_deg=4, tilt_mode="cover"))
 assert len(off) == 1 and len(on) > 3 and on[0]["text"] == "僭续试炼统一考卷" and all(e["text"] == "" for e in on[1:]), len(on)
 n_kf = len(on[0]["kf"])
 assert n_kf >= 5 and all(len(e["kf"]) == n_kf for e in on)             # moi hop co cung moc KF

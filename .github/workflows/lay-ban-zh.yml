@@ -1,0 +1,46 @@
+name: Lay ban zh tu run cu (tam thoi)
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "ID run co artifact ketqua-srtpx"
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ketqua-srtpx
+          path: art
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Dua ban Trung vao output/
+        run: |
+          mkdir -p output
+          shopt -s nullglob
+          for f in art/*.srtpx; do
+            b=$(basename "$f" .srtpx)
+            case "$b" in *.zh) n="$b" ;; *) n="$b.zh" ;; esac
+            cp "$f" "output/$n.srtpx"
+            echo "Luu: output/$n.srtpx ($(wc -c < "$f") byte)"
+          done
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add output
+          if git diff --cached --quiet; then
+            echo "Khong co gi moi."
+          else
+            git commit -m "Lay ban zh tu run ${{ inputs.run_id }}"
+            git pull --rebase
+            git push
+          fi

@@ -63,6 +63,19 @@ Fps càng cao thì mốc thời gian càng sát (30fps khớp mẫu nhất) như
 | `--scale` | Phóng to vùng quét trước khi OCR (chữ nhỏ → tăng lên) |
 | `--no-refine` | Tắt bước tinh chỉnh mốc thời gian (xem dưới). Mặc định **bật** |
 | `--refine-reach` | Số khung gốc tối đa xét lùi/tới ở mỗi đầu câu khi tinh chỉnh (mặc định `max(bước lấy mẫu, 4)`) |
+| `--no-split-jumps` | Tắt bước tách block khi chữ phụ nhảy chỗ (xem dưới). Mặc định **bật** |
+| `--jump-rows` | Chữ đổi chỗ từ ngần này lần chiều cao 1 dòng chữ (mặc định 2, tối thiểu 5% chiều cao khung hình) giữa 2 khung lấy mẫu liền nhau mới tính là nhảy; `0` = tắt |
+| `--jump-speed` | ...và phải nhanh hơn ngần này chiều cao khung hình mỗi giây (mặc định 0.5). Chữ trượt/bay vào chậm hơn nhiều nên không bị tách |
+
+
+### Phụ đề phụ: chữ nhảy chỗ thì tạo block mới
+
+Chữ đứng yên ở A suốt vài giây rồi **nhảy** sang B chỉ có 2 keyframe (lúc bắt đầu A, lúc đến B), nên `srtpx_cover` nội suy A → B trên cả khoảng đó: hộp và chữ **trượt chậm** từ A sang B dù thực tế chữ biến mất ở A và hiện ở B trong 1 khung. Nay với **phụ đề phụ** (câu không thuộc nhóm cùng vị trí đông nhất, cùng luật "phụ đề chính" của `srtpx_cover`), nếu giữa 2 khung lấy mẫu liền nhau chữ đổi chỗ ≥ `--jump-rows` × chiều cao 1 dòng chữ **và** nhanh hơn `--jump-speed`, tool **tách thành block mới** bắt đầu đúng lúc chữ hiện ở chỗ mới (mỗi block đứng yên, không có KF trượt qua). Chữ trượt/bay vào thật (chậm) vẫn là 1 block có KF.
+
+- Chỉ tách khi **cả hai mép** ngang (hoặc cả hai mép dọc) cùng dời: chữ dài ra/ngắn đi (một mép đổi) không phải nhảy.
+- OCR đo lệch 1–2 khung rồi về chỗ cũ không bị tách; đoạn quá ngắn (< `--min-move-sec`) nhập vào đoạn kế bên.
+- Phụ đề chính (hàng chữ ở dưới) không bao giờ bị tách. Không xác định được nhóm chính (ít hơn 2 câu cùng vị trí) thì mọi câu được coi là phụ.
+- `--report` in ra các câu bị tách. Test: `python demo/test_jump_split.py`.
 
 ### Tinh chỉnh mốc bắt đầu/kết thúc theo khung gốc
 

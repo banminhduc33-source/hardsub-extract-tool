@@ -20,7 +20,6 @@ import json
 import os
 import re
 import shutil
-import socket
 import sys
 import time
 import urllib.error
@@ -217,25 +216,12 @@ def translate_chunk(pool, model, texts, timeout, label=""):
         except (KeyError, IndexError, ValueError, json.JSONDecodeError) as e:
             bad_format += 1
             reason = "tra ve khong dung (%s)" % e
-            if len(texts) > 1 and bad_format >= 2:
-                mid = len(texts) // 2
-                log("   %schia nho %d cau thanh 2 phan" % (label, len(texts)))
-                return (translate_chunk(pool, model, texts[:mid], timeout, label)
-                        + translate_chunk(pool, model, texts[mid:], timeout, label))
             if len(texts) == 1 and bad_format >= 8:
                 log("   %sCANH BAO: khong dich duoc cau nay, giu nguyen ban goc: %r"
                     % (label, texts[0]))
                 return texts
         except Exception as e:  # mat mang, timeout, ...
             reason = repr(e)
-            timed_out = isinstance(e, (TimeoutError, socket.timeout)) or isinstance(
-                getattr(e, "reason", None), (TimeoutError, socket.timeout))
-            if timed_out and len(texts) > 1 and attempt >= 2:
-                # Dich ca file 1 phat ma qua lau (file dai) -> chia doi cho nhe hon
-                mid = len(texts) // 2
-                log("   %squa thoi gian, chia nho %d cau thanh 2 phan" % (label, len(texts)))
-                return (translate_chunk(pool, model, texts[:mid], timeout, label)
-                        + translate_chunk(pool, model, texts[mid:], timeout, label))
         wait = min(5 * 2 ** min(attempt - 1, 5), 60)
         log("   %sLoi lan %d (%s), thu lai sau %ds..." % (label, attempt, reason, wait))
         time.sleep(wait)
@@ -266,9 +252,7 @@ def main():
     ap.add_argument("-o", "--output", help="File dau ra (mac dinh ghi de len file vao)")
     ap.add_argument("--keep-original", help="Luu ban chua dich vao duong dan nay")
     ap.add_argument("--model", default=os.environ.get("GEMINI_MODEL", "gemini-4-hydrogen"))
-    ap.add_argument("--chunk", type=int, default=40,
-                    help="So cau moi lan goi API (mac dinh 40, toi thieu 1; khong co che do dich ca file 1 lan)")
-    ap.add_argument("--timeout", type=int, default=120)
+    ap.add_argument("--timeout", type=int, default=300)
     args = ap.parse_args()
 
     keys = load_keys()
@@ -290,15 +274,14 @@ def main():
     log("[DICH] %d cau, model %s, %d key, %d ten trong bang" % (len(todo), args.model, len(keys), len(GLOSSARY)))
 
     translated = {}
-    step = args.chunk if args.chunk > 0 else 40  # luon dich tung dot, khong gui ca file 1 lan
-    for k in range(0, len(todo), step):
-        part = todo[k:k + step]
-        label = "[%d-%d/%d] " % (k + 1, k + len(part), len(todo))
-        src = [t for _, t in part]
+    # Luon gui TOAN BO cau trong 1 lan goi API (khong chia nho)
+    if todo:
+        label = "[1-%d/%d] " % (len(todo), len(todo))
+        src = [t for _, t in todo]
         res = translate_chunk(pool, args.model, src, args.timeout, label)
         if GLOSSARY:
             res = fix_names(pool, args.model, src, res, args.timeout, label)
-        for (n, _), vi in zip(part, res):
+        for (n, _), vi in zip(todo, res):
             translated[n] = vi
         log("   %sxong" % label)
 

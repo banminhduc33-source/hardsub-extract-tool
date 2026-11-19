@@ -34,10 +34,10 @@ bộ ghi file tạo ra **giống từng byte** file mẫu.
 ## Cách chạy
 
 ```bash
-python3 hardsub_extract.py video.mp4 -o ketqua.srtpx --engine paddleocr --lang ch --fps 30 \
+python3 hardsub_extract.py video.mp4 -o ketqua.srtpx --engine paddleocr --lang ch --fps 12 \
     --debug-dir debug_frames --debug-every 20
 ```
-Fps càng cao thì mốc thời gian càng sát (30fps khớp mẫu nhất) nhưng chạy càng lâu.
+Fps càng cao thì mốc thời gian càng sát (fps cao khớp mẫu nhất) nhưng chạy càng lâu.
 
 ## Tham số hay chỉnh
 
@@ -86,7 +86,7 @@ OCR chỉ chạy ở các khung lấy mẫu (`--fps 10` trên video 30fps = cứ
 
 `translate_srtpx.py` dịch phần chữ Hán trong file `.srtpx` sang tiếng Việt, giữ nguyên thời gian, `Độ rộng`, `Vị trí`, `KF`.
 
-- **GitHub Actions**: vào Settings → Secrets and variables → Actions → New repository secret, tên `GEMINI_API_KEYS`, giá trị là các API key, **mỗi dòng một key**. Có secret này thì workflow tự dịch sau khi bóc (tắt bằng ô `translate` khi chạy tay). Bản tiếng Trung được giữ ở `output/<tên>.zh.srtpx`. Đổi model: tạo Variable `GEMINI_MODEL` (mặc định `gemini-3.5-flash-lite`).
+- **GitHub Actions**: vào Settings → Secrets and variables → Actions → New repository secret, tên `GEMINI_API_KEYS`, giá trị là các API key, **mỗi dòng một key**. Có secret này thì workflow tự dịch sau khi bóc (tắt bằng ô `translate` khi chạy tay). Bản tiếng Trung được giữ ở `output/<tên>.zh.srtpx`. Đổi model: tạo Variable `GEMINI_MODEL` (mặc định `gemini-hydrogen`).
 - **Trên máy**: tạo file `keys.txt` cạnh script (mỗi dòng một key, file này đã được git bỏ qua), rồi chạy `python translate_srtpx.py video.srtpx -o video_vi.srtpx --keep-original video.zh.srtpx`, hoặc tích ô "Dịch sang tiếng Việt" trong giao diện.
 - Key hết quota thì tự đổi sang key kế tiếp; key bị từ chối thì bị loại.
 

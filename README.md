@@ -80,6 +80,8 @@ OCR chỉ chạy ở các khung lấy mẫu (`--fps 10` trên video 30fps = cứ
 
 `python demo/test_regress.py` (gộp câu, chữ dọc, hộp chéo cho chữ xoay/nghiêng) và các `demo/test_*.py` khác.
 
-## Chữ nghiêng / chạy chéo: hộp 4 góc
+## Chữ nghiêng / chạy chéo
 
-Mặc định (`--tilt-mode quad`) chữ nghiêng hoặc xoay được xuất thành **1 hộp 4 góc** (dòng `Góc: ax ay bx by cx cy dx dy`, hoặc `KG <giây>s: ...` kèm mỗi dòng KF nếu chữ chuyển động) — `srtpx_cover` bản có "Hộp 4 góc" vẽ đúng đa giác và xoay chữ theo. `Độ rộng/Vị trí/KF` vẫn là hộp bao nên phần mềm cũ không hỏng. Dùng `--tilt-mode cover` để quay lại chuỗi hộp chữ nhật nhỏ chạy chéo cho phần mềm đọc cũ. Test: `python demo/test_quad_output.py`.
+- **Chữ nghiêng đứng yên** (mặc định `--tilt-mode quad`): xuất thêm dòng `Đa giác: x,y x,y x,y x,y` (4 góc thật: trên-trái, trên-phải, dưới-phải, dưới-trái). `srtpx_cover` vẽ hộp đen theo đa giác; `Độ rộng/Vị trí` vẫn là hộp thẳng nên bản cũ không hiểu dòng này vẫn che được.
+- **Chữ nghiêng/xoay + chuyển động** (có KF): `srtpx_cover` chưa có đa giác theo keyframe nên dùng chuỗi hộp chữ nhật nhỏ chạy chéo, mỗi hộp có KF riêng.
+- `--tilt-mode cover`: luôn dùng chuỗi hộp chữ nhật nhỏ (cho phần mềm đọc cũ). Test: `python demo/test_quad_output.py`.

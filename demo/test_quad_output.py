@@ -20,7 +20,7 @@ for (px, py), (qx, qy) in zip(P, pts):               # thu tu goc: tren-trai, tr
 # 2) khong nghieng -> khong co dong Da giac (hop chu nhat nhu cu)
 P0 = poly_of(745, 920, 1000, 100, 0)
 sm0 = [(k * step, H.build_blocks([blk("《退学但被保送》", bbox(P0), P0)])) for k in range(10)]
-assert "Đa giác" not in H.format_srtpx(H.build_tracks(sm0, step), 1440, 1080, step, tilt_deg=4.0)
+assert "Đa giác" not in H.format_srtpx(H.build_tracks(sm0, step), 1440, 1080, step, tilt_deg=4.0, poly_secondary=False)
 # 3) xoay + chuyen dong: 1 entry, moi KF co 1 dong KP cung gio, 4 goc trung da giac OCR tung khung
 poly_at = lambda k: poly_of(700 + k * 10, 600, 600, 80, 10 + k * 2)
 sm = [(k * step, H.build_blocks([blk("僭续试炼统一考卷", bbox(poly_at(k)), poly_at(k))])) for k in range(20)]
@@ -45,12 +45,12 @@ def corners(entry_text, tag="Đa giác"):
     return [tuple(float(v) for v in p.split(",")) for p in m.group(1).split()]
 
 
-# 5) mac dinh (poly_secondary=False) KHONG doi: chu thang van la hop chu nhat; bat len thi cau thang cung ra 4 goc
+# 5) poly_secondary mac dinh la True: cau thang cung ra 4 goc; tat di (False) thi chu thang van la hop chu nhat nhu cu
 P0 = poly_of(745, 920, 1000, 100, 0)
 sm0 = [(k * step, H.build_blocks([blk("《退学但被保送》", bbox(P0), P0)])) for k in range(10)]
 tr0 = H.build_tracks(sm0, step)
-assert "Đa giác" not in H.format_srtpx(tr0, 1440, 1080, step, tilt_deg=4.0)
-out = H.format_srtpx(tr0, 1440, 1080, step, tilt_deg=4.0, poly_secondary=True)
+assert "Đa giác" not in H.format_srtpx(tr0, 1440, 1080, step, tilt_deg=4.0, poly_secondary=False)
+out = H.format_srtpx(tr0, 1440, 1080, step, tilt_deg=4.0)      # mac dinh = True
 assert out.count("Đa giác:") == 1 and "KF" not in out, out
 q = corners(out)
 assert len(q) == 4
@@ -72,7 +72,8 @@ assert set(by_text) >= set(main_txt) | {"僭续试炼"}, list(by_text)
 for t in main_txt:
     assert "Đa giác" not in by_text[t] and "KP" not in by_text[t], by_text[t]      # phu de chinh: hop chu nhat nhu cu
 assert by_text["僭续试炼"].count("Đa giác:") == 1, by_text["僭续试炼"]            # phu de phu: da giac
-assert H.format_srtpx(H.build_tracks(sm, step), 1440, 1080, step, tilt_deg=4.0).count("Đa giác") == 0   # mac dinh khong doi
+assert H.format_srtpx(H.build_tracks(sm, step), 1440, 1080, step, tilt_deg=4.0, poly_secondary=False).count("Đa giác") == 0
+assert H.format_srtpx(H.build_tracks(sm, step), 1440, 1080, step, tilt_deg=4.0).count("Đa giác:") >= 1   # mac dinh: phu de phu la da giac
 
 # 7) the bay + xoay (cot chu doc ~ 90 do, qua moc 45 do) nhu cau "继续试炼" o video Belike: moi KF mot dong KP, khong khung nao
 #    bi loai, khung khong co da giac van duoc 4 goc hop, va thu tu goc lien tuc (khong bi xoan khi canh ngan/dai doi vai tro)

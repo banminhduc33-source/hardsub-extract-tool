@@ -1292,10 +1292,10 @@ def _tilt_quad_dynamic(tr, main, kfs, tilt_deg, pad, width, height, force=False)
 
 def format_srtpx(tracks, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, med_win=5,
                  min_move_sec=0.1, report=False, move_tol=10.0, pad_ratio=0.0, join_gap=0.0, tilt_deg=0.0,
-                 tilt_mode="quad", poly_secondary=False):
+                 tilt_mode="quad", poly_secondary=True):
     """poly_secondary=True (chi co tac dung o tilt_mode="quad"): MOI cau khong thuoc phu de chinh (main_lane_ids) deu xuat
     da giac 4 goc ("Đa giác:" khi dung yen, "KP" tung keyframe khi chuyen dong), ke ca chu thang, cot chu doc, cau ngan.
-    Phu de chinh giu hop chu nhat den nhu cu. Mac dinh False de file xuat giong het ban cu (demo/test_format.py)."""
+    Phu de chinh giu hop chu nhat den nhu cu. Mac dinh True. poly_secondary=False cho ra file giong het ban cu, chi co hop chu nhat (demo/test_format.py)."""
     tracks = sorted(tracks, key=lambda tr: (tr.start, tr.frames[0][1][2]))
     ends = join_ends(tracks, step_sec, join_gap)
     main_ids = main_lane_ids(tracks, width, height) if poly_secondary and tilt_mode == "quad" else None
@@ -1374,7 +1374,7 @@ def format_srtpx(tracks, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, me
 
 def write_srtpx(tracks, out_path, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, med_win=5,
                 min_move_sec=0.1, report=False, move_tol=10.0, pad_ratio=0.0, join_gap=0.0, tilt_deg=0.0,
-                tilt_mode="quad", poly_secondary=False):
+                tilt_mode="quad", poly_secondary=True):
     content = format_srtpx(tracks, width, height, step_sec, kf_tol, stable_sec, med_win, min_move_sec,
                            report, move_tol, pad_ratio, join_gap, tilt_deg, tilt_mode, poly_secondary)
     with open(out_path, "wb") as f:   # ghi nhi phan de giu dung CRLF tren moi he dieu hanh

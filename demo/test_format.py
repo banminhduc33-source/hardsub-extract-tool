@@ -38,6 +38,6 @@ for e in ref.split("\r\n\r\n")[1:]:
 
 samples = [(k / 30, frames.get(k, [])) for k in range(max(frames) + 1)]
 tracks = H.build_tracks(samples, step)
-out = H.format_srtpx(tracks, w, h, step)
+out = H.format_srtpx(tracks, w, h, step, poly_secondary=False)   # file mau cu chi co hop chu nhat
 print("GIONG HET file mau:", out == ref)
 sys.exit(0 if out == ref else 1)

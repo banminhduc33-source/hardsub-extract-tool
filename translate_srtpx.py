@@ -267,7 +267,7 @@ def main():
     ap.add_argument("--keep-original", help="Luu ban chua dich vao duong dan nay")
     ap.add_argument("--model", default=os.environ.get("GEMINI_MODEL", "gemini-4-hydrogen"))
     ap.add_argument("--chunk", type=int, default=40,
-                    help="So cau moi lan goi API (mac dinh 40). 0 = dich TOAN BO file trong 1 lan goi (ton kem hon khi loi)")
+                    help="So cau moi lan goi API (mac dinh 40, toi thieu 1; khong co che do dich ca file 1 lan)")
     ap.add_argument("--timeout", type=int, default=120)
     args = ap.parse_args()
 
@@ -290,7 +290,7 @@ def main():
     log("[DICH] %d cau, model %s, %d key, %d ten trong bang" % (len(todo), args.model, len(keys), len(GLOSSARY)))
 
     translated = {}
-    step = args.chunk if args.chunk > 0 else max(1, len(todo))  # --chunk 0: gui ca file 1 phat
+    step = args.chunk if args.chunk > 0 else 40  # luon dich tung dot, khong gui ca file 1 lan
     for k in range(0, len(todo), step):
         part = todo[k:k + step]
         label = "[%d-%d/%d] " % (k + 1, k + len(part), len(todo))

@@ -189,7 +189,7 @@ class OcrEngine:
     crop ROI và có thể đã phóng to theo `scale`).
     """
 
-    def __init__(self, engine="paddleocr", lang="ch", min_conf=0.4, det_side=960, use_cls=True):
+    def __init__(self, engine="tesseract", lang="chi_sim", min_conf=0.4, det_side=960, use_cls=True):
         """det_side (chi paddleocr): canh dai toi da (px) cua anh dua vao bo DO CHU; anh lon hon bi thu ve. Nho = nhanh hon, nhung
         chu nho li ti de bi bo sot (PaddleOCR mac dinh 960). use_cls (chi paddleocr): chay bo phan loai huong 0/180 do cho tung o chu
         (cham them; chu nghieng lay goc tu da giac do chu nen thuong khong can)."""
@@ -536,100 +536,16 @@ def tighten_poly(gray, poly, grow=0.15, min_keep=0.3):
             for x, y in ((x1, y1), (x2, y1), (x2, y2), (x1, y2))]
 
 
-TILE_OVERLAP = 0.18        # o chong len nhau moi phia = so nay x canh o (chu nam vat giua 2 o van tron ven o it nhat 1 o)
-TILE_MIN_SIDE = 360        # px (anh da phong to): o nho hon nua thi khong dang chia
-TILE_EDGE_TOL = 3.0        # hop OCR cach mep o <= so px nay (o mep trong, khong phai mep anh) coi la bi cat
-DUP_CONTAIN = 0.6          # 2 hop trung nhau khi dien tich giao >= ty le nay x dien tich hop nho hon
-
-
-def parse_tiles(spec, roi_w, roi_h):
-    """'auto' | '1x1' | 'CxR' -> (cot, hang). auto: chia doi moi chieu khi vung quet >= ~1100px ngang / ~700px doc
-    (video 1080p quet toan khung -> 2x2; video 576p hoac dai phu de mong -> khong chia chieu do)."""
-    s = str(spec or "1x1").strip().lower()
-    if s == "auto":
-        return (2 if roi_w >= 1100 else 1, 2 if roi_h >= 700 else 1)
-    try:
-        c, r = s.replace("*", "x").split("x")
-        return (max(1, min(6, int(c))), max(1, min(6, int(r))))
-    except ValueError:
-        raise ValueError(f"--tiles phai la auto hoac CxR (vd 2x2), nhan duoc: {spec!r}")
-
-
-def auto_det_side(roi_w, roi_h, scale, tiles):
-    """Canh dai toi da dua vao bo do chu: theo o (sau phong to), lam tron len boi 32, kep trong 960..1280.
-    640 mac dinh cu lam chu nho tren video 1080p bi bo sot."""
-    long_side = max(roi_w / tiles[0], roi_h / tiles[1]) * (1 + 2 * TILE_OVERLAP if max(tiles) > 1 else 1) * scale
-    return int(min(1280, max(960, math.ceil(long_side / 32.0) * 32)))
-
-
-def _tile_spans(n, size, overlap=TILE_OVERLAP):
-    """Chia [0, size) thanh n doan (a, b) chong len nhau."""
-    if n <= 1:
-        return [(0, size)]
-    core = size / n
-    ov = overlap * core
-    return [(int(round(max(0.0, i * core - ov))), int(round(min(float(size), (i + 1) * core + ov)))) for i in range(n)]
-
-
-def _box_area(b):
-    return max(0.0, b["x_max"] - b["x_min"]) * max(0.0, b["y_max"] - b["y_min"])
-
-
-def _is_dup(a, b, thr=DUP_CONTAIN):
-    iw = min(a["x_max"], b["x_max"]) - max(a["x_min"], b["x_min"])
-    ih = min(a["y_max"], b["y_max"]) - max(a["y_min"], b["y_min"])
-    if iw <= 0 or ih <= 0:
-        return False
-    return iw * ih / max(1.0, min(_box_area(a), _box_area(b))) >= thr
-
-
-def merge_dup_boxes(boxes):
-    """Gop cac o chu trung nhau (cung 1 dong chu bi nhieu luot quet tim ra): NMS theo do chua nhau.
-    Uu tien o KHONG bi cat o mep o, roi o nhieu chu hon (luot quet ca khung co the doc thieu chu nho, o nho doc ro hon), roi conf."""
-    order = sorted(boxes, key=lambda b: (not b.get("clipped", False), len(b["text"]), b["conf"], _box_area(b)), reverse=True)
-    kept = []
-    for b in order:
-        if not any(_is_dup(b, k) for k in kept):
-            kept.append(b)
-    for b in kept:
-        b.pop("clipped", None)
-    return kept
-
-
-def detect_tiled(engine, img, tiles=(1, 1), overlap=TILE_OVERLAP, full_pass=True):
-    """OCR anh theo luoi cot x hang o chong len nhau (+ 1 luot ca anh neu full_pass), gop hop trung.
-    Moi o duoc bo do chu thu/phong rieng nen chu nho hoac chu tren nen sang ma 1 luot ca khung bo sot van bat duoc.
-    Toa do tra ve theo he toa do cua img. tiles=(1,1): chi 1 luot (nhu engine.detect)."""
-    cols, rows = tiles
-    H_, W_ = img.shape[:2]
-    if cols * rows <= 1 or W_ / cols < TILE_MIN_SIDE or H_ / rows < TILE_MIN_SIDE:
-        return engine.detect(img)
-    out = list(engine.detect(img)) if full_pass else []
-    for ya, yb in _tile_spans(rows, H_, overlap):
-        for xa, xb in _tile_spans(cols, W_, overlap):
-            for b in engine.detect(img[ya:yb, xa:xb]):
-                tw, th = xb - xa, yb - ya
-                clipped = ((xa > 0 and b["x_min"] <= TILE_EDGE_TOL) or (xb < W_ and b["x_max"] >= tw - TILE_EDGE_TOL) or
-                           (ya > 0 and b["y_min"] <= TILE_EDGE_TOL) or (yb < H_ and b["y_max"] >= th - TILE_EDGE_TOL))
-                nb = dict(b, x_min=b["x_min"] + xa, x_max=b["x_max"] + xa, y_min=b["y_min"] + ya, y_max=b["y_max"] + ya,
-                          clipped=clipped)
-                if b.get("poly"):
-                    nb["poly"] = [(p[0] + xa, p[1] + ya) for p in b["poly"]]
-                out.append(nb)
-    return merge_dup_boxes(out)
-
-
 def detect_frame_blocks(engine, roi_img, roi_offset, scale, cjk_only=True, min_h=0.0, min_chars=1,
-                        tighten=False, tiles=(1, 1)):
+                        tighten=False):
     """OCR 1 frame da crop ROI -> list khoi chu, toa do quy ve khung hinh goc.
 
     Chi giu chu LON, ro (hien thi tren man hinh): bo o chu cao < min_h px (chu li ti trong bang/UI/watermark)
-    va bo khoi co it hon min_chars chu. tighten=True: siet hop OCR theo net chu (tighten_box), chi cho chu thang.
-    tiles=(cot, hang) > 1x1: quet theo o chong len nhau roi gop hop trung (detect_tiled)."""
+    va bo khoi co it hon min_chars chu. tighten=True: siet hop OCR theo net chu (tighten_box), chi cho chu thang."""
     ox, oy = roi_offset
     gray = cv2.cvtColor(roi_img, cv2.COLOR_BGR2GRAY) if tighten and roi_img.ndim == 3 else None
     boxes = []
-    for b in (detect_tiled(engine, roi_img, tiles) if tuple(tiles) != (1, 1) else engine.detect(roi_img)):
+    for b in engine.detect(roi_img):
         y_min, y_max = b["y_min"] / scale + oy, b["y_max"] / scale + oy
         if y_max - y_min < min_h:
             continue
@@ -952,201 +868,6 @@ def refine_edges(video_path, tracks, native_fps, step, width, height, reach=None
                 tr.refined_end = new_end
                 changed += 1
     return changed
-
-
-# --------------------------------------------------------------------------
-# 3c) HOP DEN THEO MAT NA CHU (diem anh on dinh + dung mau chu)
-# --------------------------------------------------------------------------
-# tighten_box (Canny) hong tren nen nhieu (anh game co nhieu net): canh cua nen cung duoc dem nhu net chu nen hop bi phinh hoac lech.
-# Phu de cung thi DUNG YEN trong khi nen video chuyen dong, va co mau chu co dinh (vang vien den, trang vien den). Nen voi moi
-# cau tinh: (1) diem anh ON DINH qua cac khung cua cau, (2) dung MAU CHU, (3) bo vet nho/mang ngoai le, roi lay hop bao cua mat na
-# (+ do day vien den) lam hop den.
-
-TEXT_COLORS = ("auto", "white", "yellow")
-MASK_DEV_TOL = 28          # diem anh on dinh: lech toi da (moi kenh, moi khung) so voi trung vi cac khung <= so nay
-MASK_LAB_TOL = 40          # dung mau chu: khoang cach Lab (thang cv2 uint8) toi mau tam <= so nay
-MASK_MIN_FRAMES = 2
-
-
-def _color_candidates(med_bgr, only=None):
-    """Cac mat na mau chu ung vien tren anh trung vi: trang, vang. 'dominant' (mau sang/bao hoa nhieu nhat) tinh o noi goi."""
-    hsv = cv2.cvtColor(med_bgr, cv2.COLOR_BGR2HSV)
-    h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
-    cands = {"white": (s < 70) & (v > 200), "yellow": (h >= 15) & (h <= 40) & (s > 110) & (v > 170)}
-    if only in cands:
-        cands = {only: cands[only]}
-    return cands, hsv
-
-
-def stable_text_box(crops, box, row_h, text_color="auto", dev_tol=MASK_DEV_TOL, lab_tol=MASK_LAB_TOL):
-    """Hop chu (x1, x2, y1, y2) tinh tu mat na diem anh on dinh + dung mau chu, toa do trong crop; None neu khong dang tin.
-
-    crops: cac anh BGR cung kich thuoc (cac khung cua cung 1 cau); box: hop OCR/hop da siet (cung he toa do crop); row_h: cao 1 dong chu.
-    An toan: khong tim duoc mau chu ro, hoac mat na thua han hop OCR (chu nhieu mau, keo ra bi cat bot) -> None (giu hop cu)."""
-    if len(crops) < MASK_MIN_FRAMES:
-        return None
-    h, w = crops[0].shape[:2]
-    bx1, bx2 = max(0, int(math.floor(box[0]))), min(w, int(math.ceil(box[1])))
-    by1, by2 = max(0, int(math.floor(box[2]))), min(h, int(math.ceil(box[3])))
-    if bx2 - bx1 < 4 or by2 - by1 < 4:
-        return None
-    stack = np.stack(crops).astype(np.int16)
-    med = np.median(stack, axis=0).astype(np.int16)
-    stable = np.abs(stack - med).max(axis=(0, 3)) <= dev_tol
-    med = med.astype(np.uint8)
-    inbox = np.zeros((h, w), bool)
-    inbox[by1:by2, bx1:bx2] = True
-    box_area = float((bx2 - bx1) * (by2 - by1))
-
-    cands, hsv = _color_candidates(med, only=text_color if text_color in ("white", "yellow") else None)
-    if text_color == "auto":
-        # mau thu 3: mau sang / bao hoa nhieu nhat trong cac diem on dinh cua hop (chu mau khac trang/vang)
-        pool = stable & inbox & ((hsv[..., 2] >= 150) | (hsv[..., 1] >= 120))
-        if pool.sum() >= 30:
-            q = (hsv[..., 0].astype(np.int32) // 9) * 16 + (hsv[..., 1].astype(np.int32) // 64) * 4 + (hsv[..., 2].astype(np.int32) // 64)
-            top = int(np.bincount(q[pool]).argmax())
-            cands["dominant"] = q == top
-    dark = stable & (hsv[..., 2] < 120)                         # vien den on dinh (nguong nhe de tinh ca diem khu rang cua)
-    ring_k = max(1, int(round(0.06 * row_h)))
-    best, best_score = None, 0.0
-    for name, m in cands.items():
-        core = m & stable & inbox
-        cnt = int(core.sum())
-        if cnt < max(30, 0.004 * box_area):
-            continue
-        ring = (cv2.dilate(core.astype(np.uint8), np.ones((3, 3), np.uint8), iterations=ring_k) > 0) & ~core & inbox
-        frac = float((ring & dark).sum()) / max(1, int(ring.sum()))     # chu that co vien den bao quanh; nen thi it
-        score = cnt * (0.5 + frac)
-        if score > best_score:
-            best, best_score = (name, core), score
-    if best is None:
-        return None
-    core = best[1]
-    lab = cv2.cvtColor(med, cv2.COLOR_BGR2LAB).astype(np.float32)
-    center = np.median(lab[core], axis=0)
-    dist = np.sqrt(((lab - center) ** 2).sum(axis=2))
-    mask = stable & (dist <= lab_tol)
-    em = int(round(0.5 * row_h)) + 2                             # chi xet quanh hop OCR, khong keo ra vat to khac
-    allowed = np.zeros((h, w), bool)
-    allowed[max(0, by1 - em):min(h, by2 + em), max(0, bx1 - em):min(w, bx2 + em)] = True
-    mask = (mask & allowed).astype(np.uint8)
-    if mask.sum() < 20:
-        return None
-    # noi cac net chu thanh cum (chu, dong) roi bo cum vun va cum khong cham hop OCR
-    k = max(2, int(round(0.3 * row_h)))
-    joined = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_RECT, (2 * k + 1, 2 * k + 1)))
-    n, labels, stats, _ = cv2.connectedComponentsWithStats(joined, connectivity=8)
-    counts = np.bincount(labels[mask > 0], minlength=n)
-    counts[0] = 0
-    keep = [i for i in range(1, n)
-            if counts[i] >= max(8, 0.04 * counts.max()) and
-            min(stats[i, 0] + stats[i, 2], bx2) > max(stats[i, 0], bx1) and min(stats[i, 1] + stats[i, 3], by2) > max(stats[i, 1], by1)]
-    if not keep:
-        return None
-    sel = np.isin(labels, keep) & (mask > 0)
-    ys, xs = np.nonzero(sel)
-    if len(xs) < 20:
-        return None
-    x1, x2, y1, y2 = int(xs.min()), int(xs.max()) + 1, int(ys.min()), int(ys.max()) + 1
-    # Mat na chi bat duoc 1 phan chu (chu nhieu mau...) -> khong tin. Hop OCR co the dang PHINH (chinh la truong hop can sua) nen
-    # so voi hop OCR da tru le no (0.5 chieu cao dong moi phia) chu khong so truc tiep.
-    slack = 0.5 * row_h
-    need_w = 0.6 * max(1.0, (bx2 - bx1) - 2 * slack)
-    need_h = 0.7 * row_h
-    if (by2 - by1) >= 1.6 * row_h:                                # khoi nhieu dong: phai phu phan lon chieu cao
-        need_h = max(need_h, 0.6 * ((by2 - by1) - 1.2 * row_h))
-    if (x2 - x1) < need_w or (y2 - y1) < need_h:
-        return None
-    # do day vien den: no hop them k px khi vong vien thuc su la diem den on dinh
-    grow, prev = 0, sel
-    for k_ in range(1, max(1, int(round(0.12 * row_h))) + 1):
-        cur = cv2.dilate(sel.astype(np.uint8), np.ones((3, 3), np.uint8), iterations=k_) > 0
-        ring = cur & ~prev
-        if ring.sum() == 0 or float((ring & dark).sum()) / float(ring.sum()) < 0.45:
-            break
-        grow, prev = k_, cur
-    return (float(max(0, x1 - grow)), float(min(w, x2 + grow)), float(max(0, y1 - grow)), float(min(h, y2 + grow)))
-
-
-def refine_boxes_by_mask(video_path, tracks, native_fps, step, width, height, text_color="auto", max_frames=7, report=False):
-    """Thay hop cua cac cau DUNG YEN, THANG bang hop theo mat na chu (stable_text_box) tinh tu vai khung goc cua cau.
-
-    Bo qua cau chuyen dong (co KF) va cau nghieng; cau nao mat na khong dang tin thi giu hop cu (tighten_box/OCR).
-    Tra ve (so cau da doi hop, so cau xet)."""
-    if not tracks:
-        return 0, 0
-    step_sec = step / native_fps
-    jobs, need, last_need = [], collections.defaultdict(list), {}
-    for tr in tracks:
-        if len(tr.frames) < MASK_MIN_FRAMES or classify_motion(tr, step_sec)[0]:
-            continue
-        if tr.polys and _tilted_track(_track_geoms(tr), FORCE_QUAD_MIN_DEG):
-            continue
-        box = _median_box([b for _, b in tr.frames])
-        rh = max(4.0, tr.row_h())
-        p = int(round(2 + 0.6 * rh))
-        x1, x2 = max(0, int(box[0] - p)), min(width, int(math.ceil(box[1] + p)))
-        y1, y2 = max(0, int(box[2] - p)), min(height, int(math.ceil(box[3] + p)))
-        if x2 - x1 < 8 or y2 - y1 < 8:
-            continue
-        n = len(tr.frames)
-        lo = n // 10 if n - 2 * (n // 10) >= MASK_MIN_FRAMES else 0         # bo ~10% hai dau: chu dang hien/tat dan
-        hi = n - (n // 10) if lo else n
-        pick = sorted({int(round(i)) for i in np.linspace(lo, hi - 1, min(max_frames, hi - lo))})
-        fidx = sorted({int(round(tr.frames[i][0] * native_fps)) for i in pick})
-        j = len(jobs)
-        jobs.append(dict(tr=tr, region=(x1, x2, y1, y2), box=(box[0] - x1, box[1] - x1, box[2] - y1, box[3] - y1), rh=rh,
-                         crops=[], left=len(fidx)))
-        for f in fidx:
-            need[f].append(j)
-        last_need[j] = fidx[-1]
-    if not need:
-        return 0, 0
-
-    changed = 0
-    done = 0
-
-    def finish(j):
-        nonlocal changed, done
-        job = jobs[j]
-        done += 1
-        res = stable_text_box(job["crops"], job["box"], job["rh"], text_color)
-        job["crops"] = []                                                  # giai phong bo nho
-        if res is None:
-            if report:
-                print(f"  [mat na] giu hop cu: {job['tr'].text()!r}", file=sys.stderr)
-            return
-        x1, _x2, y1, _y2 = job["region"]
-        nb = (res[0] + x1, res[1] + x1, res[2] + y1, res[3] + y1)
-        tr = job["tr"]
-        if report:
-            ob = _median_box([b for _, b in tr.frames])
-            print(f"  [mat na] {tr.text()!r}: {tuple(round(v) for v in ob)} -> {tuple(round(v) for v in nb)}", file=sys.stderr)
-        tr.frames = [(t, nb) for t, _ in tr.frames]
-        changed += 1
-
-    cap = cv2.VideoCapture(video_path)
-    idx, last = 0, max(need)
-    while idx <= last:
-        if idx in need:
-            ok, frame = cap.read()
-        else:
-            ok = cap.grab()
-            frame = None
-        if not ok:
-            break
-        for j in need.get(idx, ()):
-            x1, x2, y1, y2 = jobs[j]["region"]
-            jobs[j]["crops"].append(frame[y1:y2, x1:x2].copy())
-            jobs[j]["left"] -= 1
-            if jobs[j]["left"] == 0:
-                finish(j)
-        idx += 1
-    cap.release()
-    for j, job in enumerate(jobs):                                         # doan video cut som: xu ly nhung gi doc duoc
-        if job["left"] > 0 and job["crops"]:
-            finish(j)
-    return changed, len(jobs)
 
 
 # --------------------------------------------------------------------------
@@ -2057,8 +1778,7 @@ def scan_samples(engine, video_path, target_fps, start_frame, end_frame, cfg, ta
             if scale != 1.0:
                 roi_img = cv2.resize(roi_img, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
             blocks = detect_frame_blocks(engine, roi_img, (rx0, ry0), scale, cjk_only=cfg["cjk_only"],
-                                         min_h=cfg["min_h"], min_chars=cfg["min_chars"], tighten=cfg["tighten"],
-                                         tiles=cfg.get("tiles", (1, 1)))
+                                         min_h=cfg["min_h"], min_chars=cfg["min_chars"], tighten=cfg["tighten"])
             last_blocks = blocks
         samples.append((t, blocks))
         if cfg["debug_dir"] and k % cfg["debug_every"] == 0:           # k = chi so mau toan video, khong phu thuoc chia doan
@@ -2127,11 +1847,9 @@ def main():
     ap.add_argument("--fps", type=float, default=12.0, help="FPS lấy mẫu khung hình (mặc định 12)")
     ap.add_argument("--roi", default="0,0,1.0,1.0",
                     help="Vùng quét, phân số x1,y1,x2,y2 (mặc định toàn khung hình)")
-    ap.add_argument("--engine", choices=["tesseract", "easyocr", "paddleocr"], default="paddleocr",
-                    help="Mac dinh paddleocr (tra ve hop + da giac tung dong chu, chinh xac nhat). tesseract chi de du phong")
-    ap.add_argument("--lang", default=None,
-                    help="paddleocr='ch'/'chinese_cht', easyocr='ch_sim'/'ch_tra', tesseract='chi_sim'/'chi_tra' "
-                         "(bo trong = gian the cua engine dang chon)")
+    ap.add_argument("--engine", choices=["tesseract", "easyocr", "paddleocr"], default="tesseract")
+    ap.add_argument("--lang", default="chi_sim",
+                    help="tesseract='chi_sim'/'chi_tra', paddleocr='ch'/'chinese_cht', easyocr='ch_sim'/'ch_tra'")
     ap.add_argument("--scale", type=float, default=2.0, help="Phóng to ROI trước khi OCR")
     ap.add_argument("--min-conf", type=float, default=0.6, help="Ngưỡng tin cậy OCR tối thiểu (0..1)")
     ap.add_argument("--min-height", type=float, default=0.035,
@@ -2191,20 +1909,9 @@ def main():
                          "Lon hon = bo qua nhieu hon, nhanh hon nhung co the bo sot chu moi hien nho/mo")
     ap.add_argument("--skip-max", type=int, default=8,
                     help="Toi da so khung lien tiep bo qua truoc khi bat buoc OCR lai (mac dinh 8)")
-    ap.add_argument("--det-side", type=int, default=0,
-                    help="paddleocr: canh dai toi da (px) cua anh dua vao bo do chu, anh lon hon bi thu ve. 0 = tu chon 960..1280 theo "
-                         "kich thuoc o quet (mac dinh; 640 cu lam chu nho tren video 1080p bi bo sot). Nho = nhanh hon nhung de sot chu nho")
-    ap.add_argument("--tiles", default="auto",
-                    help="Quet theo o chong len nhau roi gop hop trung: 'auto' (mac dinh: vung quet >= 1100px ngang / 700px doc thi chia "
-                         "doi chieu do, tuc video 1080p quet toan khung = 2x2 + 1 luot ca khung), '1x1' = tat, hoac CxR (vd 3x2). "
-                         "Cham hon ~ so luot quet nhung bat duoc chu nho / chu tren nen sang ma 1 luot ca khung bo sot")
-    ap.add_argument("--no-mask-box", action="store_true",
-                    help="Tat buoc dung hop den theo MAT NA CHU (diem anh on dinh qua cac khung cua cau + dung mau chu), quay ve hop OCR/Canny")
-    ap.add_argument("--text-color", choices=TEXT_COLORS, default="auto",
-                    help="Mau chu phu de cho mat na: auto (thu trang / vang / mau noi nhat, chon cai co vien den bao quanh), white, yellow")
-    ap.add_argument("--ui-text", action="store_true",
-                    help="Giao dien game nhieu chu nho: ha --min-height xuong 0.012, --min-chars 1, ha --min-conf 0.5 (chi doi cac tham so "
-                         "ban chua tu dat). Nen di kem translate_srtpx.py --ui")
+    ap.add_argument("--det-side", type=int, default=640,
+                    help="paddleocr: canh dai toi da (px) cua anh dua vao bo do chu, anh lon hon bi thu ve (mac dinh 640; "
+                         "PaddleOCR goc la 960). Nho = nhanh hon, nhung chu nho li ti de bi bo sot; chu cao >= 3,5%% khung hinh thi on")
     ap.add_argument("--angle-cls", action="store_true",
                     help="paddleocr: bat bo phan loai huong 0/180 do cho tung o chu (mac dinh tat vi cham them; chu nghieng "
                          "lay goc tu da giac do chu). Bat neu video co chu bi lat nguoc")
@@ -2228,12 +1935,6 @@ def main():
     ap.add_argument("--debug-dir", default=None, help="Thư mục lưu ảnh debug đã kẻ khung")
     ap.add_argument("--debug-every", type=int, default=15, help="Lưu debug mỗi N frame đã xử lý")
     args = ap.parse_args()
-    if args.ui_text:                              # preset cho giao dien game: chi dung neu nguoi dung khong tu dat tham so do
-        for name, val in (("min_height", 0.012), ("min_chars", 1), ("min_conf", 0.5)):
-            if getattr(args, name) == ap.get_default(name):
-                setattr(args, name, val)
-    if not args.lang:
-        args.lang = {"paddleocr": "ch", "easyocr": "ch_sim", "tesseract": "chi_sim"}[args.engine]
 
     try:
         info = video_info(args.video, args.fps)
@@ -2242,16 +1943,6 @@ def main():
     w, h, step_sec = info["width"], info["height"], info["step_sec"]
     roi_px = parse_roi(args.roi, w, h)
     rx0, ry0, rx1, ry1 = roi_px
-    try:
-        tiles = parse_tiles(args.tiles, rx1 - rx0, ry1 - ry0)
-    except ValueError as e:
-        sys.exit(str(e))
-    if args.engine != "paddleocr" and tiles != (1, 1):
-        print(f"Canh bao: --tiles chi nen dung voi paddleocr; engine {args.engine} van chay theo o ({tiles[0]}x{tiles[1]})", file=sys.stderr)
-    if args.det_side <= 0:
-        args.det_side = auto_det_side(rx1 - rx0, ry1 - ry0, args.scale, tiles)
-    print(f"OCR: {args.engine}/{args.lang}, quet {tiles[0]}x{tiles[1]} o"
-          f"{' + 1 luot ca khung' if tiles != (1, 1) else ''}, det-side {args.det_side}", file=sys.stderr)
 
     if args.debug_dir:
         os.makedirs(args.debug_dir, exist_ok=True)
@@ -2260,7 +1951,7 @@ def main():
                use_cls=args.angle_cls, roi_px=roi_px, scale=args.scale, cjk_only=not args.keep_non_cjk,
                min_h=args.min_height * h, min_chars=args.min_chars, tighten=not args.no_tighten,
                skip=not (args.no_skip or args.skip_diff <= 0), skip_diff=args.skip_diff,
-               skip_max=max(0, args.skip_max), debug_dir=args.debug_dir, debug_every=args.debug_every, tiles=tiles)
+               skip_max=max(0, args.skip_max), debug_dir=args.debug_dir, debug_every=args.debug_every)
 
     res = scan_parallel(args.video, args.fps, info, args.workers, cfg) if args.workers > 1 else None
     if res is None:
@@ -2280,11 +1971,6 @@ def main():
         tracks, n_cut = split_jumpy_tracks(tracks, w, h, args.jump_rows, args.jump_speed, args.min_move_sec,
                                            step_sec, args.report)
         print(f"Tach block khi chu phu nhay cho: {n_cut} cho", file=sys.stderr)
-    if not args.no_mask_box:
-        # Truoc refine_edges: hop chinh xac hon thi vung doi chieu net chu cua refine_edges cung chinh xac hon.
-        n_mask, n_try = refine_boxes_by_mask(args.video, tracks, info["native_fps"], info["step"], w, h,
-                                             text_color=args.text_color, report=args.report)
-        print(f"Hop den theo mat na chu: doi {n_mask}/{n_try} cau dung yen (cac cau con lai giu hop OCR)", file=sys.stderr)
     if not args.no_refine:
         n_ref = refine_edges(args.video, tracks, info["native_fps"], info["step"], w, h, reach=args.refine_reach)
         print(f"Tinh chinh moc thoi gian theo khung goc: doi {n_ref} moc", file=sys.stderr)

@@ -45,7 +45,7 @@ Fps càng cao thì mốc thời gian càng sát (fps cao khớp mẫu nhất) nh
 |---|---|
 | `--roi x1,y1,x2,y2` | Vùng quét (phân số 0..1). Mặc định toàn khung hình; thu nhỏ (vd `0,0.75,1,1`) để chạy nhanh hơn |
 | `--fps` | Số khung quét mỗi giây |
-| `--engine` / `--lang` | `paddleocr`: `ch`/`chinese_cht`; `easyocr`: `ch_sim`/`ch_tra`; `tesseract`: `chi_sim`/`chi_tra` |
+| `--engine` / `--lang` | Mặc định `paddleocr` + `ch` (trả hộp và đa giác theo từng dòng chữ nên chính xác nhất). `paddleocr`: `ch`/`chinese_cht`; `easyocr`: `ch_sim`/`ch_tra`; `tesseract`: `chi_sim`/`chi_tra` (chỉ để dự phòng). Bỏ trống `--lang` = giản thể của engine đang chọn |
 | `--keep-non-cjk` | Giữ cả chữ không phải chữ Hán (mặc định bỏ) |
 | `--similarity` | Ngưỡng giống nhau để coi 2 khung là cùng một câu (mặc định 0.6) |
 | `--merge-sim` | Ngưỡng nối các mảnh câu bị đứt (mặc định 0.5) |
@@ -62,7 +62,10 @@ Fps càng cao thì mốc thời gian càng sát (fps cao khớp mẫu nhất) nh
 | `--no-skip` | Tắt bỏ qua khung không đổi (mặc định **bật**: khung gần như giống khung đã OCR gần nhất thì dùng lại kết quả cũ thay vì OCR lại; chữ hardsub thường đứng yên cả giây nên nhanh hơn nhiều. Chữ mới hiện, chữ chuyển động, nền động vẫn OCR từng khung) |
 | `--skip-diff` | Bỏ qua khung nếu tỉ lệ điểm ảnh đổi (trên ảnh thu nhỏ, làm mờ) nhỏ hơn số này, tính theo % (mặc định 0.05). Lớn hơn = nhanh hơn nhưng có thể sót chữ nhỏ/mờ mới hiện |
 | `--skip-max` | Tối đa số khung liên tiếp được bỏ qua trước khi bắt buộc OCR lại (mặc định 8) |
-| `--det-side` | paddleocr: cạnh dài tối đa (px) của ảnh đưa vào bộ dò chữ (mặc định 640, PaddleOCR gốc 960). Nhỏ = nhanh hơn nhưng chữ nhỏ li ti dễ bị sót |
+| `--det-side` | paddleocr: cạnh dài tối đa (px) của ảnh đưa vào bộ dò chữ. Mặc định `0` = tự chọn 960–1280 theo kích thước ô quét (640 cũ làm chữ nhỏ trên video 1080p bị sót). Nhỏ = nhanh hơn nhưng chữ nhỏ li ti dễ bị sót |
+| `--tiles` | Quét theo ô chồng lên nhau rồi gộp hộp trùng (xem dưới). Mặc định `auto`; `1x1` = tắt; hoặc `CxR` (vd `3x2`) |
+| `--no-mask-box` / `--text-color` | Tắt / chỉnh bước dựng hộp đen theo mặt nạ chữ (xem dưới). `--text-color auto\|white\|yellow` |
+| `--ui-text` | Giao diện game nhiều chữ nhỏ: hạ `--min-height` xuống 0.012, `--min-chars` 1, `--min-conf` 0.5 (chỉ đổi tham số bạn chưa tự đặt). Dịch kèm `translate_srtpx.py --ui` |
 | `--angle-cls` | paddleocr: bật bộ phân loại hướng 0/180° cho từng ô chữ (mặc định tắt vì chậm thêm; chữ nghiêng lấy góc từ đa giác dò chữ). Bật nếu video có chữ bị lật ngược |
 | `--no-tighten` | Tắt bước siết hộp OCR theo nét chữ thật (mặc định bật: cắt nền thừa ở mép hộp, mở rộng nếu chữ bị cắt mất; chỉ áp dụng cho chữ thẳng) |
 | `--split-sim` | 2 đoạn chữ ổn định kề nhau trong cùng 1 câu mà giống nhau < số này (mặc định 0.85) thì **tách thành 2 câu** (trước đây câu liền kề giống ≥60% bị gộp thành 1). `0` = tắt |
@@ -74,6 +77,24 @@ Fps càng cao thì mốc thời gian càng sát (fps cao khớp mẫu nhất) nh
 | `--jump-rows` | Chữ đổi chỗ từ ngần này lần chiều cao 1 dòng chữ (mặc định 2, tối thiểu 5% chiều cao khung hình) giữa 2 khung lấy mẫu liền nhau mới tính là nhảy; `0` = tắt |
 | `--jump-speed` | ...và phải nhanh hơn ngần này chiều cao khung hình mỗi giây (mặc định 0.5). Chữ trượt/bay vào chậm hơn nhiều nên không bị tách |
 
+
+### Quét theo ô chồng nhau + nhiều tỷ lệ (`--tiles`)
+
+PaddleOCR thu ảnh vào về `--det-side` rồi mới dò chữ, nên một lượt quét cả khung 1080p làm chữ nhỏ hoặc chữ trên nền sáng bị bỏ sót. Với `--tiles CxR` (mặc định `auto`: vùng quét ≥ 1100px ngang / 700px dọc thì chia đôi chiều đó, video 1080p quét toàn khung = 2x2), tool OCR **1 lượt cả khung + từng ô** (các ô chồng lên nhau 18%, mỗi ô được dò ở tỷ lệ riêng) rồi gộp hộp trùng: hộp nằm gọn trong hộp khác bị coi là trùng, giữ hộp không bị cắt ở mép ô, rồi hộp nhiều chữ hơn, rồi `conf` cao hơn. Chạy chậm hơn xấp xỉ số lượt quét (5 lượt với 2x2); `--no-skip` tắt, `--tiles 1x1` về 1 lượt. Test: `python demo/test_tiles.py`.
+
+### Hộp đen theo mặt nạ chữ (mặc định bật, tắt bằng `--no-mask-box`)
+
+`tighten_box` dựa vào Canny nên hỏng trên nền nhiều nét (ảnh game): cạnh của nền cũng bị tính là nét chữ, hộp bị phình hoặc lệch. Phụ đề cứng thì **đứng yên trong khi nền video chuyển động**, và có **màu chữ cố định** (vàng viền đen, trắng viền đen...). Nên sau khi gom câu, với mỗi câu **đứng yên và thẳng** tool đọc lại tối đa 7 khung gốc của câu và:
+
+1. Tính điểm ảnh **ổn định** (lệch ≤ 28 mức xám ở mọi khung của câu so với trung vị).
+2. Chọn **màu chữ** trong hộp (trắng / vàng / màu sáng-bão hòa nhất — chọn cái có viền đen bao quanh; ép bằng `--text-color`), chỉ giữ điểm ổn định đúng màu đó (khoảng cách Lab).
+3. Bỏ vết nhỏ và cụm không chạm hộp OCR, lấy hộp bao của mặt nạ, nở thêm đúng độ dày viền đen đo được.
+
+Câu nào mặt nạ không đáng tin (không thấy màu chữ rõ, mặt nạ chỉ bắt được một phần chữ như chữ nhiều màu) thì **giữ hộp cũ**. Câu chuyển động (có KF) và câu nghiêng không áp dụng. `--report` in từng câu đổi hộp. Test: `python demo/test_textmask.py`.
+
+### Giao diện game nhiều chữ (`--ui-text`)
+
+Video quay màn hình game có nhiều nhãn/nút/mô tả nhỏ: thêm `--ui-text` (hoặc ô "Video là giao diện game nhiều chữ nhỏ" trong giao diện, hoặc input `ui_text` của workflow). Tool lấy cả chữ nhỏ (3,5% → 1,2% chiều cao khung) và quét theo ô để không sót; khi dịch dùng `translate_srtpx.py --ui` để Gemini dịch như nhãn UI game: ngắn gọn, đúng thuật ngữ, giữ số/ký hiệu. Nên đặt `glossary.txt` cho tên kỹ năng/vật phẩm.
 
 ### Phụ đề phụ: chữ nhảy chỗ thì tạo block mới
 
@@ -99,7 +120,7 @@ OCR chỉ chạy ở các khung lấy mẫu (`--fps 10` trên video 30fps = cứ
 
 ## Kiểm tra
 
-`python demo/test_regress.py` (gộp câu, chữ dọc, hộp chéo cho chữ xoay/nghiêng) và các `demo/test_*.py` khác.
+`python demo/test_regress.py` (gộp câu, chữ dọc, hộp chéo cho chữ xoay/nghiêng), `demo/test_tiles.py`, `demo/test_textmask.py` và các `demo/test_*.py` khác.
 
 ## Chữ nghiêng / chạy chéo
 

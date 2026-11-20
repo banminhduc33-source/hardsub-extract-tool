@@ -1852,8 +1852,11 @@ def main():
                     help="tesseract='chi_sim'/'chi_tra', paddleocr='ch'/'chinese_cht', easyocr='ch_sim'/'ch_tra'")
     ap.add_argument("--scale", type=float, default=2.0, help="Phóng to ROI trước khi OCR")
     ap.add_argument("--min-conf", type=float, default=0.6, help="Ngưỡng tin cậy OCR tối thiểu (0..1)")
-    ap.add_argument("--min-height", type=float, default=0.035,
-                    help="Chỉ lấy chữ cao ít nhất tỉ lệ này so với chiều cao video (mặc định 0.035 = 3.5%%); "
+    ap.add_argument("--skip-start", type=float, default=0.2,
+                    help="Bỏ chữ ở N giây đầu video (mặc định 0.2): khung đầu thường là ảnh bìa/thumbnail có chữ tiêu đề, "
+                         "không phải phụ đề. 0 = tắt")
+    ap.add_argument("--min-height", type=float, default=0.06,
+                    help="Chỉ lấy chữ cao ít nhất tỉ lệ này so với chiều cao video (mặc định 0.06 = 6%%, phụ đề thường cao ~8-11%%); "
                          "chữ nhỏ li ti trong bảng/giao diện bị bỏ. 0 = tắt")
     ap.add_argument("--min-chars", type=int, default=2,
                     help="Một khối chữ phải có ít nhất ngần này chữ mới được lấy (mặc định 2)")
@@ -1961,6 +1964,12 @@ def main():
                            det_side=args.det_side, use_cls=args.angle_cls)
         res = scan_samples(engine, args.video, args.fps, 0, None, cfg)
     samples, skipped, total = res
+    if args.skip_start > 0:
+        # Giu nguyen luoi thoi gian, chi xoa chu o khung dau (anh bia/thumbnail) de khong thanh phu de.
+        n_cov = sum(1 for t, b in samples if t < args.skip_start and b)
+        samples = [(t, [] if t < args.skip_start else b) for t, b in samples]
+        if n_cov:
+            print(f"Bo chu o {args.skip_start:g}s dau (anh bia): {n_cov} khung", file=sys.stderr)
     if cfg["skip"]:
         print(f"Bo qua OCR {skipped}/{total} khung giong khung truoc (OCR {total - skipped} khung)", file=sys.stderr)
     tracks = build_tracks(samples, step_sec, similarity=args.similarity,

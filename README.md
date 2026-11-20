@@ -52,7 +52,8 @@ Fps càng cao thì mốc thời gian càng sát (fps cao khớp mẫu nhất) nh
 | `--kf-tol` | Khung lệch quá số pixel này thì tính là chuyển động (mặc định 6) |
 | `--stable-sec` | Khung giữ yên ít nhất số giây này mới là khung ổn định chính (mặc định 0.5) |
 | `--min-frames` / `--max-gap-frames` | Lọc nhiễu / chịu được OCR chớp tắt |
-| `--min-height` | Chỉ lấy chữ cao ít nhất tỉ lệ này so với chiều cao video (mặc định 0.035 = 3.5%), bỏ chữ li ti trong bảng/giao diện; `0` = tắt |
+| `--skip-start` | Bỏ chữ ở N giây đầu video (mặc định 0.2): khung đầu thường là ảnh bìa/thumbnail có chữ tiêu đề, không phải phụ đề; `0` = tắt |
+| `--min-height` | Chỉ lấy chữ cao ít nhất tỉ lệ này so với chiều cao video (mặc định 0.06 = 6%; phụ đề thường cao ~8-11%, chữ UI/game nhỏ hơn bị bỏ), bỏ chữ li ti trong bảng/giao diện; `0` = tắt |
 | `--min-chars` | Khối chữ phải có ít nhất ngần này chữ mới lấy (mặc định 2) |
 | `--no-poly-secondary` | Tắt chế độ "mọi phụ đề phụ đều là đa giác" (mặc định **bật**, chỉ với `--tilt-mode quad`): khi bật, mọi câu **không** thuộc phụ đề chính đều xuất dòng `Đa giác:` / `KP` (kể cả chữ thẳng, cột chữ dọc, câu ngắn, thẻ chữ bay + xoay); phụ đề chính vẫn là hộp chữ nhật đen. Khi tắt, chỉ chữ nghiêng từ `--tilt` độ trở lên mới thành đa giác |
 | `--tilt` | Chữ nghiêng từ ngần này độ trở lên (mặc định 2, `0` = tắt) thì thay hộp đen to bằng 1 hộp chính (có chữ) + chuỗi hộp nhỏ không chữ chạy theo đường chéo. Dùng được cả khi chữ **vừa nghiêng/xoay vừa chuyển động** (mỗi hộp có KF riêng) và khi chữ nghiêng tới 80°; cần engine có góc đa giác (paddleocr/easyocr) |

@@ -64,7 +64,7 @@ class App(tk.Tk):
         self.roi = tk.StringVar(value=list(ROI_PRESETS)[0])
         self.fps = tk.StringVar(value="12")
         self.debug = tk.BooleanVar(value=True)
-        self.translate = tk.BooleanVar(value=False)
+        self.translate = tk.BooleanVar(value=True)
 
         rows = [
             ("Công cụ đọc chữ:", ttk.Combobox(opt, textvariable=self.engine, values=list(ENGINES), state="readonly", width=44)),

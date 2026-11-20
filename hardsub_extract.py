@@ -38,10 +38,7 @@ VI DU:
 """
 
 import argparse
-import bisect
-import copy
 import math
-import multiprocessing
 import collections
 import difflib
 import os
@@ -63,18 +60,14 @@ def video_info(video_path, target_fps):
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     native_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)       # co the = 0 / sai so nhe tuy codec
     cap.release()
     sample_fps = min(target_fps, native_fps) if target_fps else native_fps
     step = max(1, round(native_fps / sample_fps))
-    return dict(width=w, height=h, native_fps=native_fps, step=step, step_sec=step / native_fps, frames=frames)
+    return dict(width=w, height=h, native_fps=native_fps, step=step, step_sec=step / native_fps)
 
 
-def iter_sampled(video_path, target_fps, start_frame=0, end_frame=None):
-    """Sinh (chi_so_mau, thoi_gian_giay, frame_BGR) cho cac khung goc co chi so chia het `step` (cung luoi lay mau voi iter_frames),
-    chi trong [start_frame, end_frame) (end_frame=None: den het video). Quet theo doan van cho dung cac khung va moc thoi gian
-    nhu quet mot mach, nen ghep ket qua cac doan khong can chong lan. Khung truoc start_frame chi bi bo qua (grab, khong chuyen
-    mau) chu khong nhay (seek) vi seek cua OpenCV khong luon chinh xac den tung khung; start_frame nen la boi so cua `step`."""
+def iter_frames(video_path, target_fps):
+    """Sinh (thoi_gian_giay, frame_BGR) theo target_fps; thoi gian tinh theo FPS goc."""
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise RuntimeError(f"Không mở được video: {video_path}")
@@ -82,66 +75,14 @@ def iter_sampled(video_path, target_fps, start_frame=0, end_frame=None):
     sample_fps = min(target_fps, native_fps) if target_fps else native_fps
     step = max(1, round(native_fps / sample_fps))
     frame_idx = 0
-    try:
-        while end_frame is None or frame_idx < end_frame:
-            if frame_idx >= start_frame and frame_idx % step == 0:
-                ok, frame = cap.read()
-                if not ok:
-                    break
-                yield frame_idx // step, frame_idx / native_fps, frame
-            elif not cap.grab():
-                break
-            frame_idx += 1
-    finally:
-        cap.release()
-
-
-def iter_frames(video_path, target_fps):
-    """Sinh (thoi_gian_giay, frame_BGR) theo target_fps; thoi gian tinh theo FPS goc."""
-    for _k, t, frame in iter_sampled(video_path, target_fps):
-        yield t, frame
-
-
-class FrameSkipper:
-    """Bo qua OCR o khung gan nhu GIONG khung da OCR gan nhat (dung lai ket qua cu): OCR la buoc cham nhat, ma chu hardsub
-    thuong dung yen ca giay.
-
-    So sanh voi khung da OCR GAN NHAT (khong phai khung ngay truoc) nen thay doi tu tu (chu mo dan) cong don den khi vuot nguong
-    thi OCR lai. Anh vung quet duoc thu nho (`thumb_w` px ngang), lam mo roi dem ty le diem anh lech hon `pix_thr` muc xam;
-    chi can ty le do >= `diff_pct` % la OCR lai. Nen dat nguong nho hon dien tich vai chu (~0,2% khung hinh) de chu moi hien
-    khong bi bo qua. `max_skip`: toi da so khung lien tiep duoc bo qua, het so do thi OCR lai du anh khong doi.
-
-    Chu dang chuyen dong, hoac nen dong (nhan vat dong, hieu ung) lam anh doi nhieu -> khong bo qua, chay nhu cu."""
-
-    def __init__(self, diff_pct=0.05, max_skip=8, thumb_w=480, pix_thr=20):
-        self.diff_pct = diff_pct
-        self.max_skip = max_skip
-        self.thumb_w = thumb_w
-        self.pix_thr = pix_thr
-        self._ref = None
-        self._run = 0
-        self.skipped = 0
-        self.total = 0
-
-    def _sig(self, img_bgr):
-        g = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY) if img_bgr.ndim == 3 else img_bgr
-        h, w = g.shape[:2]
-        if w > self.thumb_w:
-            g = cv2.resize(g, (self.thumb_w, max(1, round(h * self.thumb_w / w))), interpolation=cv2.INTER_AREA)
-        return cv2.GaussianBlur(g, (5, 5), 0)
-
-    def should_skip(self, img_bgr):
-        """True: khung nay giong khung OCR gan nhat, dung lai ket qua cu. False: phai OCR (va khung nay thanh moc so sanh moi)."""
-        self.total += 1
-        sig = self._sig(img_bgr)
-        if self._ref is not None and self._ref.shape == sig.shape and self._run < self.max_skip:
-            changed = float((cv2.absdiff(sig, self._ref) > self.pix_thr).sum()) / sig.size
-            if changed * 100.0 < self.diff_pct:
-                self._run += 1
-                self.skipped += 1
-                return True
-        self._ref, self._run = sig, 0
-        return False
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        if frame_idx % step == 0:
+            yield frame_idx / native_fps, frame
+        frame_idx += 1
+    cap.release()
 
 
 def seconds_to_srt_ts(t):
@@ -189,15 +130,10 @@ class OcrEngine:
     crop ROI và có thể đã phóng to theo `scale`).
     """
 
-    def __init__(self, engine="tesseract", lang="chi_sim", min_conf=0.4, det_side=960, use_cls=True):
-        """det_side (chi paddleocr): canh dai toi da (px) cua anh dua vao bo DO CHU; anh lon hon bi thu ve. Nho = nhanh hon, nhung
-        chu nho li ti de bi bo sot (PaddleOCR mac dinh 960). use_cls (chi paddleocr): chay bo phan loai huong 0/180 do cho tung o chu
-        (cham them; chu nghieng lay goc tu da giac do chu nen thuong khong can)."""
+    def __init__(self, engine="tesseract", lang="chi_sim", min_conf=0.4):
         self.engine = engine
         self.lang = lang
         self.min_conf = min_conf
-        self.det_side = det_side
-        self.use_cls = use_cls
         self._backend = None
 
         if engine == "paddleocr":
@@ -207,9 +143,8 @@ class OcrEngine:
             # toi uu cua Paddle Inference dung -> SIGILL (exit 132) trong
             # SelfAttentionFusePass. Tat ir_optim + mkldnn de chay an toan.
             self._backend = PaddleOCR(
-                use_angle_cls=use_cls, lang=lang, show_log=False,
+                use_angle_cls=True, lang=lang, show_log=False,
                 use_gpu=False, enable_mkldnn=False, ir_optim=False,
-                det_limit_side_len=det_side,
             )
         elif engine == "easyocr":
             import easyocr  # lazy import
@@ -230,7 +165,7 @@ class OcrEngine:
 
     def _detect_paddle(self, img_bgr):
         out = []
-        result = self._backend.ocr(img_bgr, cls=self.use_cls)
+        result = self._backend.ocr(img_bgr, cls=True)
         if not result or result[0] is None:
             return out
         for box, (text, conf) in result[0]:
@@ -375,13 +310,8 @@ def _should_merge_h(a, b):
     return False
 
 
-MAX_BLOCK_ROWS = 4.0    # 1 khoi (1 cau) khong the xep chong qua so dong nay: lon hon la gop day chuyen nham nhieu o chu khac nhau
-
-
-def build_blocks(boxes, cjk_only=True, max_rows=MAX_BLOCK_ROWS):
+def build_blocks(boxes, cjk_only=True):
     """Gom cac o chu gan nhau thanh khoi (1 cau). boxes da o toa do khung hinh goc.
-    Gop theo cap gan nhat truoc, va TU CHOI cap gop nao lam khoi day qua max_rows x be day 1 dong (chu nen / bang / logo noi
-    chuoi cac o chu cung hang-xuong dong lam hop phu de phinh to bat thuong). max_rows <= 0: khong gioi han.
     Tra ve list[dict(text, bbox=(x_min,x_max,y_min,y_max), conf)]."""
     if cjk_only:
         boxes = [b for b in boxes if _is_cjk(b["text"])]
@@ -389,8 +319,6 @@ def build_blocks(boxes, cjk_only=True, max_rows=MAX_BLOCK_ROWS):
         return []
     n = len(boxes)
     parent = list(range(n))
-    members = {i: [i] for i in range(n)}
-    bbox = {i: [b["x_min"], b["x_max"], b["y_min"], b["y_max"]] for i, b in enumerate(boxes)}
 
     def find(i):
         while parent[i] != i:
@@ -398,30 +326,10 @@ def build_blocks(boxes, cjk_only=True, max_rows=MAX_BLOCK_ROWS):
             i = parent[i]
         return i
 
-    pairs = []
     for i in range(n):
         for j in range(i + 1, n):
             if _should_merge(boxes[i], boxes[j]):
-                d = math.hypot((boxes[i]["x_min"] + boxes[i]["x_max"] - boxes[j]["x_min"] - boxes[j]["x_max"]) / 2,
-                               (boxes[i]["y_min"] + boxes[i]["y_max"] - boxes[j]["y_min"] - boxes[j]["y_max"]) / 2)
-                pairs.append((d, i, j))
-    pairs.sort()
-    for _d, i, j in pairs:
-        ri, rj = find(i), find(j)
-        if ri == rj:
-            continue
-        mem = members[ri] + members[rj]
-        a, c = bbox[ri], bbox[rj]
-        nb = [min(a[0], c[0]), max(a[1], c[1]), min(a[2], c[2]), max(a[3], c[3])]
-        if max_rows > 0:
-            vertical = all(_is_vertical(boxes[k]) for k in mem)
-            stack = (nb[1] - nb[0]) if vertical else (nb[3] - nb[2])     # be day theo chieu xep dong (cot -> rong, dong -> cao)
-            unit = statistics.median(_thickness(boxes[k]) for k in mem)
-            if stack > max_rows * max(unit, 1.0):
-                continue
-        parent[ri] = rj
-        members[rj] = mem
-        bbox[rj] = nb
+                parent[find(i)] = find(j)
 
     groups = collections.defaultdict(list)
     for i, b in enumerate(boxes):
@@ -505,37 +413,6 @@ def _axis_aligned(poly, tol_deg=2.0):
     return min(ang, 90.0 - ang) <= tol_deg
 
 
-def tighten_poly(gray, poly, grow=0.15, min_keep=0.3):
-    """Nhu tighten_box nhung cho CHU NGHIENG: da giac DB cua PaddleOCR luon no rong hon net chu (unclip), tren chu nghieng truoc day
-    khong duoc siet nen hop/da giac phu de phu to hon chu that. Xoay vung chu ve thang theo goc dong chu, siet o do, xoay nguoc lai.
-    An toan: khong lam duoc / ket qua bat thuong -> tra ve da giac goc."""
-    g = _quad_geom(poly)
-    if g is None or g["L"] < 4 or g["t"] < 4:
-        return poly
-    H, W = gray.shape[:2]
-    xs, ys = [p[0] for p in poly], [p[1] for p in poly]
-    m = int(math.ceil(0.5 * g["t"])) + 2
-    wx1, wx2 = max(0, int(min(xs)) - m), min(W, int(math.ceil(max(xs))) + m)
-    wy1, wy2 = max(0, int(min(ys)) - m), min(H, int(math.ceil(max(ys))) + m)
-    if wx2 - wx1 < 8 or wy2 - wy1 < 8:
-        return poly
-    win = gray[wy1:wy2, wx1:wx2]
-    D = int(math.ceil(math.hypot(wx2 - wx1, wy2 - wy1))) + 2
-    c = (g["cx"] - wx1, g["cy"] - wy1)
-    M = cv2.getRotationMatrix2D(c, g["theta"], 1.0)      # goc duong = quay nguoc chieu kim dong ho, dua huong dong chu ve ngang
-    M[0, 2] += D / 2 - c[0]
-    M[1, 2] += D / 2 - c[1]
-    rot = cv2.warpAffine(win, M, (D, D), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-    box = (D / 2 - g["L"] / 2, D / 2 + g["L"] / 2, D / 2 - g["t"] / 2, D / 2 + g["t"] / 2)
-    x1, x2, y1, y2 = tighten_box(rot, box, grow=grow, min_keep=min_keep)
-    if (x2 - x1) * (y2 - y1) > 1.5 * g["L"] * g["t"] or x2 - x1 < 2 or y2 - y1 < 2:
-        return poly
-    inv = cv2.invertAffineTransform(M)
-    return [(float(inv[0, 0] * x + inv[0, 1] * y + inv[0, 2] + wx1),
-             float(inv[1, 0] * x + inv[1, 1] * y + inv[1, 2] + wy1))
-            for x, y in ((x1, y1), (x2, y1), (x2, y2), (x1, y2))]
-
-
 def detect_frame_blocks(engine, roi_img, roi_offset, scale, cjk_only=True, min_h=0.0, min_chars=1,
                         tighten=False):
     """OCR 1 frame da crop ROI -> list khoi chu, toa do quy ve khung hinh goc.
@@ -550,16 +427,10 @@ def detect_frame_blocks(engine, roi_img, roi_offset, scale, cjk_only=True, min_h
         if y_max - y_min < min_h:
             continue
         x_min, x_max = b["x_min"] / scale + ox, b["x_max"] / scale + ox
-        src_poly = b.get("poly")
-        if gray is not None and _axis_aligned(src_poly):
+        if gray is not None and _axis_aligned(b.get("poly")):
             tx1, tx2, ty1, ty2 = tighten_box(gray, (b["x_min"], b["x_max"], b["y_min"], b["y_max"]))
             x_min, x_max, y_min, y_max = tx1 / scale + ox, tx2 / scale + ox, ty1 / scale + oy, ty2 / scale + oy
-        elif gray is not None and src_poly and len(src_poly) == 4:        # chu nghieng: siet da giac theo net chu
-            src_poly = tighten_poly(gray, src_poly)
-            px, py = [q[0] for q in src_poly], [q[1] for q in src_poly]
-            x_min, x_max = min(px) / scale + ox, max(px) / scale + ox
-            y_min, y_max = min(py) / scale + oy, max(py) / scale + oy
-        poly = [(q[0] / scale + ox, q[1] / scale + oy) for q in src_poly] if src_poly else None
+        poly = [(q[0] / scale + ox, q[1] / scale + oy) for q in b["poly"]] if b.get("poly") else None
         boxes.append(dict(text=b["text"], conf=b["conf"],
                           x_min=x_min, x_max=x_max,
                           y_min=y_min, y_max=y_max, poly=poly))
@@ -884,8 +755,7 @@ def _despike(vals, k, tol):
         return out
     r = k // 2
     for i in range(1, n - 1):
-        ri = min(r, i, n - 1 - i)             # cua so DOI XUNG: o khung thu 2 / ke cuoi cua so cut (chi 1 khung 1 ben) lam trung vi bi keo
-        m = statistics.median(vals[i - ri: i + ri + 1])     # ve phia con lai -> buoc dau cua chuyen dong giam toc bi keo lui
+        m = statistics.median(vals[max(0, i - r): i + r + 1])
         if abs(vals[i] - m) > tol:
             out[i] = m
     return out
@@ -901,44 +771,6 @@ def _geometry_frames(tr, min_text_sim=0.8):
     return keep if len(keep) >= max(2, int(0.4 * len(tr.frames))) else list(tr.frames)
 
 
-def _fix_edge_boxes(boxes, tol):
-    """Khung DAU va CUOI khong duoc loc trung vi (khong du lang gieng), ma day lai la 2 khung OCR de sai nhat: chu dang hien dan /
-    mo dan nen chi doc duoc 1 phan -> 1 mep nhay xa so voi cac khung ke ben.
-    Du doan moi mep cua khung bien tu 2 khung ke tiep (giu nguyen neu chu gan dung yen, noi suy tuyen tinh neu dang truot); trong
-    1 truc (x: mep 0,1 / y: mep 2,3), CHI KHI dung 1 mep lech > tol so voi du doan con mep kia khop thi mep lech do la nhieu
-    -> thay bang du doan. Ca 2 mep cung lech (chuyen dong giam toc co buoc dau lon nhat, hoac ca khung la) -> giu nguyen."""
-    n = len(boxes)
-    if n < 3:
-        return list(boxes)
-    boxes = [list(b) for b in boxes]
-    for a, n1, n2 in ((0, 1, 2), (n - 1, n - 2, n - 3)):
-        cur = boxes[a]
-        pred = [boxes[n1][e] if abs(boxes[n1][e] - boxes[n2][e]) <= 0.5 * tol else 2 * boxes[n1][e] - boxes[n2][e]
-                for e in range(4)]
-        for i0, i1 in ((0, 1), (2, 3)):
-            d0, d1 = abs(cur[i0] - pred[i0]), abs(cur[i1] - pred[i1])
-            if d0 > tol >= d1:
-                cur[i0] = pred[i0]
-            elif d1 > tol >= d0:
-                cur[i1] = pred[i1]
-    return [tuple(b) for b in boxes]
-
-
-def _axis_moving(boxes, ref, tol, need, axis):
-    """Truc x (axis 0: mep 0,1) / y (axis 1: mep 2,3) co chuyen dong that khong: >= need khung LIEN TIEP ma CA HAI mep
-    cua truc lech > tol khoi vi tri on dinh ref."""
-    i0, i1 = (0, 1) if axis == 0 else (2, 3)
-    run = 0
-    for b in boxes:
-        if abs(b[i0] - ref[i0]) > tol and abs(b[i1] - ref[i1]) > tol:
-            run += 1
-            if run >= need:
-                return True
-        else:
-            run = 0
-    return False
-
-
 def classify_motion(tr, step_sec, move_tol=10.0, med_win=5, min_move_sec=0.1):
     """Phan loai 1 cau: tra ve (is_dynamic, frames_da_loc, box_on_dinh, ly_do).
 
@@ -948,19 +780,13 @@ def classify_motion(tr, step_sec, move_tol=10.0, med_win=5, min_move_sec=0.1):
       - nhay dot bien 1-2 khung roi ve cho cu       (loc trung vi)
       - chi 1 mep lech (x2 vot ra/x1 vot vao)        (OCR thua/thieu chu hoac dinh chu ben canh)
       - lech nho <= tol (rung do OCR)                (tol = max(move_tol, 0.15 * chieu cao chu))
-
-    Cau DONG: frames_da_loc con duoc don them nhieu de cac KF khong bam theo nhieu OCR:
-      - khung dau/cuoi bi doc thieu 1 mep thi lay lai theo khung ke ben (_fix_edge_boxes);
-      - TRUC khong chuyen dong (vd chu chi truot len/xuong, x dung yen): khung nao lech > tol tren truc do chi la nhieu
-        (OCR dinh chu la / doc thieu chu) -> ve vi tri on dinh. Chi ap dung khi nhung khung lech la thieu so (<= 30%): neu
-        lech nhieu khung thi la chu dang hien dan (typewriter), giu nguyen de hop bam theo.
     """
     geo = _geometry_frames(tr)
     ts = [t for t, _ in geo]
     ref = _median_box([b for _, b in geo])
     tol = max(move_tol, 0.15 * (ref[3] - ref[2]))
     cols = [_despike([b[i] for _, b in geo], med_win, tol) for i in range(4)]
-    boxes = _fix_edge_boxes(list(zip(*cols)), tol)
+    boxes = list(zip(*cols))
     ref = _median_box(boxes)
     need = max(2, round(min_move_sec / step_sec))
 
@@ -974,104 +800,17 @@ def classify_motion(tr, step_sec, move_tol=10.0, med_win=5, min_move_sec=0.1):
         run = run + 1 if moving(b) else 0
         best = max(best, run)
     if best >= need:
-        mov = [_axis_moving(boxes, ref, tol, need, a) for a in (0, 1)]
-        if any(mov):                                  # khong truc nao du chuyen dong rieng (2 truc xen ke) -> giu nguyen
-            boxes = [list(b) for b in boxes]
-            for (i0, i1), is_mov in zip(((0, 1), (2, 3)), mov):
-                if is_mov:
-                    continue
-                for i in (i0, i1):
-                    bad = [abs(b[i] - ref[i]) > tol for b in boxes]
-                    if sum(bad) <= 0.3 * len(boxes):
-                        for b, x in zip(boxes, bad):
-                            if x:
-                                b[i] = ref[i]
-            boxes = [tuple(b) for b in boxes]
         return True, list(zip(ts, boxes)), ref, f"dong: {best} khung lien tiep lech > {tol:.0f}px"
     return False, list(zip(ts, boxes)), ref, f"tinh: lech lon nhat {best} khung (< {need}) hoac chi 1 mep"
 
 
-def _snap_plateaus(frames, tol, min_n, blip=2):
-    """Doan chu NAM YEN trong cau dong -> thay moi khung bang trung vi cua doan. Cau dong thuong gom truot vao -> nam yen ->
-    (truot ra); luc nam yen box OCR van rung (nen dong, vien chu, detect lech) va moi lan rung vuot kf_tol lai sinh 1 KF -> hang chuc
-    KF lung tung.
-
-    Doan nam yen = >= min_n khung lien tiep, moi khung lech <= tol so voi moc (trung vi cua cac khung do), roi keo dai ve PHIA SAU
-    qua cac cu lech ngan (< blip+1 khung roi quay ve <= tol). Dung o chuyen dong that (lech >= blip+1 khung lien tiep, hoac lech toi het
-    cau). Khong keo dai ve phia truoc nen duong truot vao khong bi nuot: cac buoc cuoi duong truot (lech > tol) giu nguyen."""
-    n = len(frames)
-    out = list(frames)
-    i = 0
-    while i + min_n <= n:
-        anchor = _median_box([b for _, b in frames[i:i + min_n]])
-        if any(_boxdiff(b, anchor) > tol for _, b in frames[i:i + min_n]):
-            i += 1
-            continue
-        j = i + min_n
-        while j < n:
-            if _boxdiff(frames[j][1], anchor) <= tol:
-                j += 1
-                continue
-            k = j
-            while k < n and _boxdiff(frames[k][1], anchor) > tol:
-                k += 1
-            if k < n and k - j <= blip:                    # lech ngan roi ve cho cu: nhieu OCR, khong phai chuyen dong
-                j = k
-            else:
-                break
-        med = _median_box([b for _, b in frames[i:j]])
-        for k in range(i, j):
-            out[k] = (frames[k][0], med)
-        i = j
-    return out
-
-
-def simplify_kfs(kfs, tol):
-    """Don gian hoa chuoi KF kieu Ramer-Douglas-Peucker theo (thoi gian, 4 mep): bo KF nao nam trong `tol` px cua duong noi suy tuyen tinh
-    giua 2 KF giu lai (do dung cach srtpx_cover noi suy). Nhieu OCR rung quanh duong truot khong con sinh ra KF zich-zac; KF "giu yen"
-    va cac goc ngoat that (vao/ra) van duoc giu vi lech xa duong noi suy."""
-    n = len(kfs)
-    if n <= 2:
-        return list(kfs)
-    keep = [False] * n
-    keep[0] = keep[-1] = True
-    stack = [(0, n - 1)]
-    while stack:
-        a, b = stack.pop()
-        if b - a < 2:
-            continue
-        ta, ba = kfs[a]
-        tb, bb = kfs[b]
-        span = max(tb - ta, 1e-9)
-        worst, wi = -1.0, -1
-        for i in range(a + 1, b):
-            ti, bi = kfs[i]
-            f = (ti - ta) / span
-            d = max(abs(bi[e] - (ba[e] + f * (bb[e] - ba[e]))) for e in range(4))
-            if d > worst:
-                worst, wi = d, i
-        if worst > tol:
-            keep[wi] = True
-            stack.append((a, wi))
-            stack.append((wi, b))
-    return [k for k, kp in zip(kfs, keep) if kp]
-
-
-def summarize_ex(tr, step_sec, kf_tol=6.0, stable_sec=0.5, med_win=5, min_move_sec=0.1, move_tol=10.0,
-                 end_t=None):
-    """Nhu summarize nhung tra them (main_box, kf_list, frames_da_don): frames_da_don la hop theo thoi gian sau khi loc nhieu
-    (rong neu khong dong: thay bang cac khung da loc cua classify_motion), de buoc dung da giac (phu de phu) dung lai dung
-    hinh da loc thay vi khung OCR tho."""
+def summarize(tr, step_sec, kf_tol=6.0, stable_sec=0.5, med_win=5, min_move_sec=0.1, move_tol=10.0,
+              end_t=None):
+    """Tra ve (main_box, kf_list). kf_list rong neu khung chu khong chuyen dong that."""
     is_dyn, frames, ref, _ = classify_motion(tr, step_sec, move_tol, med_win, min_move_sec)
     if not is_dyn:
-        return ref, [], frames                # tinh: chi 1 khung, khong KF
+        return ref, []                       # tinh: chi 1 khung, khong KF
 
-    # Rung OCR nam o dai kf_tol..tol (6-10px): classify_motion chi go khi lech > tol nen khong xoa duoc, ma KF lai sinh ra tu kf_tol.
-    # Loc trung vi them 1 luot o dung nguong kf_tol: chuoi don dieu (duong truot, bac thang) KHONG doi, chi go cac cu nhay roi ve.
-    ktol = max(kf_tol, 0.08 * tr.row_h())
-    cols = [_despike([b[i] for _, b in frames], med_win, ktol) for i in range(4)]
-    frames = list(zip([t for t, _ in frames], _fix_edge_boxes(list(zip(*cols)), ktol)))
-    frames = _snap_plateaus(frames, ktol, max(3, round(stable_sec / step_sec)))
     if end_t is None:
         end_t = tr.last_t + step_sec
     kfs = [frames[0]]
@@ -1084,10 +823,6 @@ def summarize_ex(tr, step_sec, kf_tol=6.0, stable_sec=0.5, med_win=5, min_move_s
         kfs.append((end_t, frames[-1][1]))
     else:
         kfs[-1] = (end_t, kfs[-1][1])
-    # Don gian hoa KF (go KF zich-zac do nhieu OCR). Khong ap dung cho chu nghieng/xoay: hop bao cua chu xoay doi PHI TUYEN theo goc,
-    # bo KF o giua thi noi suy tuyen tinh khong con phu het chu (cac KF moi khung hinh o do la co chu y).
-    if not (tr.polys and _tilted_track(_track_geoms(tr), 2.0)):
-        kfs = simplify_kfs(kfs, 0.5 * ktol)
 
     # Khung chinh = doan on dinh dai nhat (>= stable_sec), neu khong co thi khung dau
     runs = []
@@ -1102,13 +837,6 @@ def summarize_ex(tr, step_sec, kf_tol=6.0, stable_sec=0.5, med_win=5, min_move_s
         main = _median_box(best["boxes"])
     else:
         main = frames[0][1]
-    return main, kfs, frames
-
-
-def summarize(tr, step_sec, kf_tol=6.0, stable_sec=0.5, med_win=5, min_move_sec=0.1, move_tol=10.0,
-              end_t=None):
-    """Tra ve (main_box, kf_list). kf_list rong neu khung chu khong chuyen dong that."""
-    main, kfs, _ = summarize_ex(tr, step_sec, kf_tol, stable_sec, med_win, min_move_sec, move_tol, end_t)
     return main, kfs
 
 
@@ -1491,93 +1219,20 @@ def _align_quad(q, ref):
     return tuple(v for pt in pts for v in pt)
 
 
-def _union_geom(polys):
-    """Khoi gom NHIEU da giac (OCR cat 1 cau nghieng thanh vai o, hoac cau nhieu dong) CUNG huong nghieng -> 1 hinh binh hanh
-    nghieng bao het cac da giac. Truoc day khoi nhieu da giac roi ve hop bao thang (AABB) cua chung: chu nghieng 10-30 do thi
-    AABB to hon chu rat nhieu (hop phu "to bat thuong"). None neu < 2 da giac, co da giac suy bien, hoac goc nghieng lech nhau
-    > 4 do (cac dong khong cung huong thi khong co 1 hinh binh hanh vua khit)."""
-    gs = [_quad_geom(p) for p in polys]
-    if len(polys) < 2 or any(g is None for g in gs):
-        return None
-    thetas = [g["theta"] for g in gs]
-    med = statistics.median(thetas)
-    if max(abs(t - med) for t in thetas) > 4.0:
-        return None
-    a = math.radians(med)
-    ux, uy, vx, vy = math.cos(a), math.sin(a), -math.sin(a), math.cos(a)
-    ss = [x * ux + y * uy for p in polys for x, y in p]
-    rs = [x * vx + y * vy for p in polys for x, y in p]
-    L, t = max(ss) - min(ss), max(rs) - min(rs)
-    if L < 1 or t < 1:
-        return None
-    sc, rc = (max(ss) + min(ss)) / 2, (max(rs) + min(rs)) / 2
-    return dict(cx=sc * ux + rc * vx, cy=sc * uy + rc * vy, ax=L * ux, ay=L * uy, bx=t * vx, by=t * vy,
-                L=L, t=t, theta=med)
-
-
-def _track_geoms(tr):
-    """Hinh binh hanh (dict nhu _quad_geom) cua MOI khung cua cau (phu de phu): 1 da giac -> _quad_geom, nhieu da giac cung huong ->
-    _union_geom, con lai None (khung do dung hop thang)."""
-    out = []
-    for pl in tr.polys:
-        if len(pl) == 1:
-            out.append(_quad_geom(pl[0]))
-        elif len(pl) >= 2:
-            out.append(_union_geom(pl))
-        else:
-            out.append(None)
-    return out
-
-
-def _tilted_track(geoms, thr, min_frac=0.4):
-    """Ca CAU co nghieng that khong: trung vi |goc| cua cac khung co da giac >= thr (va co da giac o >= min_frac so khung). Quyet dinh
-    theo ca cau chu khong theo 1 khung: da giac OCR cua chu thang van lech 1-3 do do nhieu, 1 khung lech la dung ngay da giac OCR
-    (rong hon hop da siet theo net chu) lam hop phu cua ca cau bi to."""
-    th = [abs(g["theta"]) for g in geoms if g is not None]
-    return len(th) >= max(1, min_frac * len(geoms)) and statistics.median(th) >= thr
-
-
-def _geom_box(g):
-    """Hop bao thang (x1, x2, y1, y2) cua hinh binh hanh g (khong no, khong kep)."""
-    return _quad_bbox(_quad_corners(g))
-
-
-def _consistent_tol(tr):
-    return max(10.0, 0.35 * tr.row_h())
-
-
-def _clean_lookup(clean):
-    """clean = [(t, box)] theo thoi gian -> ham t -> box cua khung gan t nhat."""
-    ts = [t for t, _ in clean]
-
-    def at(t):
-        k = bisect.bisect_left(ts, t)
-        if k == 0:
-            return clean[0][1]
-        if k == len(ts):
-            return clean[-1][1]
-        return clean[k][1] if abs(ts[k] - t) < abs(t - ts[k - 1]) else clean[k - 1][1]
-    return at
-
-
 def _tilt_quad_static(tr, main, tilt_deg, pad, width, height, force=False):
     """Chu nghieng DUNG YEN (dung 1 da giac) -> 4 goc; khong thi None (dung chuoi hop che).
 
     force=True (phu de phu, xem format_srtpx): LUON tra ve 4 goc. Chu nghieng thi lay da giac OCR (moi goc, ke ca cot chu doc);
-    chu thang hoac khong dung duoc da giac thi lay 4 goc cua hop `main` da siet theo net chu.
-    Chu nghieng duoc quyet dinh theo CA CAU (trung vi goc cac khung), da giac lay tu khung khop nhat voi `main` va phai khop hop
-    `main` (khung bi OCR dinh chu la / doc thieu chu thi da giac lech xa main -> bo, dung hop main); khoi nhieu da giac cung huong
-    thi gom thanh 1 hinh binh hanh (_union_geom)."""
+    chu thang hoac khong dung duoc da giac thi lay 4 goc cua hop `main` da siet theo net chu."""
     if force:
         thr = tilt_deg if tilt_deg > 0 else FORCE_QUAD_MIN_DEG
+        g = None
         if tr.polys:
-            geoms = _track_geoms(tr)
-            if _tilted_track(geoms, thr):
-                tol = _consistent_tol(tr)
-                cands = [(_boxdiff(_geom_box(g), main), i) for i, g in enumerate(geoms) if g is not None]
-                d, idx = min(cands)
-                if d <= tol:
-                    return _quad_corners(geoms[idx], pad, width, height)
+            idx = min(range(len(tr.frames)), key=lambda i: _boxdiff(tr.frames[i][1], main))
+            polys = tr.polys[idx]
+            g = _quad_geom(polys[0]) if len(polys) == 1 else None
+        if g is not None and abs(g["theta"]) >= thr:
+            return _quad_corners(g, pad, width, height)
         return _aabb_quad(main, pad, width, height)
     if tilt_deg <= 0 or not tr.polys:
         return None
@@ -1589,41 +1244,31 @@ def _tilt_quad_static(tr, main, tilt_deg, pad, width, height, force=False):
     return _quad_corners(g, pad, width, height)
 
 
-def _force_quads(tr, tilt_deg, pad, width, height, clean=None):
-    """Quad cho TUNG khung cua mot cau co chuyen dong (che do force): da giac OCR neu chu nghieng, khong thi 4 goc hop.
-    Khung nao cung co quad (khong khung nao bi loai) va thu tu goc duoc noi tiep tu khung truoc (_align_quad).
-
-    clean = [(t, box)] hop da loc nhieu cua cau (summarize_ex): hop thang cua moi khung lay tu day (khong lay khung OCR tho: khung
-    dinh chu la / doc thieu chu lam KP phinh to hoac teo), va da giac OCR cua khung chi duoc dung khi hop bao cua no khop hop da loc
-    (khung lech xa = nhieu -> dung 4 goc hop da loc). Chu nghieng quyet dinh theo CA CAU (_tilted_track), khong theo tung khung."""
+def _force_quads(tr, tilt_deg, pad, width, height):
+    """Quad cho TUNG khung cua mot cau co chuyen dong (che do force): da giac OCR neu chu nghieng, khong thi 4 goc hop da siet.
+    Khung nao cung co quad (khong khung nao bi loai) va thu tu goc duoc noi tiep tu khung truoc (_align_quad)."""
     thr = tilt_deg if tilt_deg > 0 else FORCE_QUAD_MIN_DEG
-    geoms = _track_geoms(tr)
-    tilted = bool(geoms) and _tilted_track(geoms, thr)
-    at_clean = _clean_lookup(clean) if clean else None
-    tol = _consistent_tol(tr)
     quads, prev = {}, None
-    for i, (t, box) in enumerate(tr.frames):
-        cb = at_clean(t) if at_clean else box
-        g = geoms[i] if tilted and i < len(geoms) else None
-        if g is not None and (at_clean is None or _boxdiff(_geom_box(g), cb) <= tol):
-            q = _quad_corners(g, pad, width, height)
-        else:
-            q = _aabb_quad(cb, pad, width, height)
+    for i, (_t, box) in enumerate(tr.frames):
+        pl = tr.polys[i] if i < len(tr.polys) else []
+        g = _quad_geom(pl[0]) if len(pl) == 1 else None
+        q = _quad_corners(g, pad, width, height) if g is not None and abs(g["theta"]) >= thr \
+            else _aabb_quad(box, pad, width, height)
         if prev is not None:
             q = _align_quad(q, prev)
         quads[i] = prev = q
     return quads
 
 
-def _tilt_quad_dynamic(tr, main, kfs, tilt_deg, pad, width, height, force=False, clean=None):
+def _tilt_quad_dynamic(tr, main, kfs, tilt_deg, pad, width, height, force=False):
     """Chu nghieng/xoay + chuyen dong -> (4 goc chinh, [(t, 4 goc)]) khop moc kfs; None neu khong du da giac 1-khoi.
 
     force=True (phu de phu): bo cac dieu kien tren (>= 60% khung dung duoc, co khung nghieng, goc <= 80 do): khung nao khong
-    dung duoc da giac thi dung 4 goc hop cua khung do. Chi tra None khi khong co keyframe. `clean`: hop da loc nhieu (xem _force_quads)."""
+    dung duoc da giac thi dung 4 goc hop cua khung do. Chi tra None khi khong co keyframe."""
     if force:
         if not kfs:
             return None
-        quads = _force_quads(tr, tilt_deg, pad, width, height, clean)
+        quads = _force_quads(tr, tilt_deg, pad, width, height)
         valid = sorted(quads)
     else:
         if tilt_deg <= 0 or not tr.polys or not kfs:
@@ -1676,7 +1321,7 @@ def format_srtpx(tracks, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, me
 
     for n, tr in enumerate(tracks, start=1):
         end_t = ends[n - 1]
-        main, kfs, clean = summarize_ex(tr, step_sec, kf_tol, stable_sec, med_win, min_move_sec, move_tol, end_t=end_t)
+        main, kfs = summarize(tr, step_sec, kf_tol, stable_sec, med_win, min_move_sec, move_tol, end_t=end_t)
         if report:
             print(f"#{n:>3} {tr.text()[:12]:<12} -> {classify_motion(tr, step_sec, move_tol, med_win, min_move_sec)[3]}",
                   file=sys.stderr)
@@ -1694,7 +1339,7 @@ def format_srtpx(tracks, width, height, step_sec, kf_tol=6.0, stable_sec=0.5, me
                               file=sys.stderr)
                     continue
             else:
-                qd = _tilt_quad_dynamic(tr, main, kfs, tilt_deg, pad_px, width, height, force=force, clean=clean)
+                qd = _tilt_quad_dynamic(tr, main, kfs, tilt_deg, pad_px, width, height, force=force)
                 if qd:                              # chu nghieng/xoay + chuyen dong: 1 hop, da giac theo tung keyframe
                     mq, kq = qd
                     entry(tr.text(), tr.start, end_t, _quad_bbox(mq), [(t, _quad_bbox(q)) for t, q in kq], kps=kq)
@@ -1760,86 +1405,6 @@ def parse_roi(spec, w, h):
     return (round(x1 * w), round(y1 * h), round(x2 * w), round(y2 * h))
 
 
-def scan_samples(engine, video_path, target_fps, start_frame, end_frame, cfg, tag=""):
-    """OCR cac khung lay mau cua video trong [start_frame, end_frame) -> (samples, so_khung_bo_qua, tong_khung).
-    samples = [(thoi_gian_giay, blocks)] dung y nhu quet mot mach (cung luoi lay mau, cung moc thoi gian); khung dau cua doan
-    luon duoc OCR (FrameSkipper bat dau lai). cfg: dict cac tham so quet (xem main)."""
-    rx0, ry0, rx1, ry1 = cfg["roi_px"]
-    scale = cfg["scale"]
-    skipper = FrameSkipper(cfg["skip_diff"], cfg["skip_max"]) if cfg["skip"] else None
-    samples, last_blocks, done = [], None, 0
-    for k, t, frame in iter_sampled(video_path, target_fps, start_frame, end_frame):
-        roi_img = frame[ry0:ry1, rx0:rx1]
-        if skipper is not None and last_blocks is not None and skipper.should_skip(roi_img):
-            blocks = copy.deepcopy(last_blocks)          # khung giong khung OCR gan nhat: dung lai ket qua
-        else:
-            if skipper is not None and last_blocks is None:
-                skipper.should_skip(roi_img)             # khung OCR dau tien: dat moc so sanh
-            if scale != 1.0:
-                roi_img = cv2.resize(roi_img, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
-            blocks = detect_frame_blocks(engine, roi_img, (rx0, ry0), scale, cjk_only=cfg["cjk_only"],
-                                         min_h=cfg["min_h"], min_chars=cfg["min_chars"], tighten=cfg["tighten"])
-            last_blocks = blocks
-        samples.append((t, blocks))
-        if cfg["debug_dir"] and k % cfg["debug_every"] == 0:           # k = chi so mau toan video, khong phu thuoc chia doan
-            save_debug_frame(frame, cfg["roi_px"], blocks, os.path.join(cfg["debug_dir"], f"f_{k:06d}.jpg"))
-        done += 1
-        if done % 100 == 0:
-            print(f"...{tag}đã xử lý {done} frame (t={t:.1f}s)", file=sys.stderr)
-    return samples, (skipper.skipped if skipper else 0), (skipper.total if skipper else 0)
-
-
-def split_segments(n_samples, n_segments, step):
-    """Chia n_samples khung lay mau thanh n_segments doan lien tiep -> [(start_frame, end_frame)], end_frame=None o doan cuoi
-    (doc den het video, nen so khung do OpenCV bao sai cung khong lam mat khung nao). Moc cat luon la boi so cua `step`."""
-    bounds = [round(i * n_samples / n_segments) for i in range(n_segments + 1)]
-    return [(bounds[i] * step, bounds[i + 1] * step if i + 1 < n_segments else None) for i in range(n_segments)]
-
-
-_WORKER = {}
-
-
-def _init_scan_worker(cfg):
-    """Moi tien trinh con tu nap OcrEngine rieng (Paddle khong duoc dung chung/fork sau khi da khoi tao)."""
-    _WORKER["engine"] = OcrEngine(engine=cfg["engine"], lang=cfg["lang"], min_conf=cfg["min_conf"],
-                                  det_side=cfg["det_side"], use_cls=cfg["use_cls"])
-    _WORKER["cfg"] = cfg
-
-
-def _scan_job(job):
-    idx, n_jobs, video_path, target_fps, start_frame, end_frame = job
-    return scan_samples(_WORKER["engine"], video_path, target_fps, start_frame, end_frame, _WORKER["cfg"],
-                        tag=f"[doan {idx + 1}/{n_jobs}] ")
-
-
-MIN_SAMPLES_PER_SEGMENT = 30      # doan nao ngan hon nua thi khong dang de nap them mot mo hinh
-SEGMENTS_PER_WORKER = 3           # chia nho hon so tien trinh de can tai (doan it chu/nen tinh chay nhanh hon han)
-
-
-def scan_parallel(video_path, target_fps, info, workers, cfg):
-    """Quet video bang `workers` tien trinh. Tra ve (samples, bo_qua, tong) hoac None neu khong chia duoc (video qua ngan / khong
-    biet so khung) -> nguoi goi chay mot mach. HARDSUB_MP_START=fork|spawn|forkserver de ep cach tao tien trinh (mac dinh theo he dieu hanh)."""
-    n_samples = -(-info["frames"] // info["step"]) if info["frames"] > 0 else 0
-    n_seg = min(workers * SEGMENTS_PER_WORKER, n_samples // MIN_SAMPLES_PER_SEGMENT)
-    if workers < 2 or n_seg < 2:
-        return None
-    workers = min(workers, n_seg)
-    segs = split_segments(n_samples, n_seg, info["step"])
-    jobs = [(i, n_seg, video_path, target_fps, a, b) for i, (a, b) in enumerate(segs)]
-    # Moi tien trinh chi dung ~ cpu/workers luong cho tinh toan; neu nguoi dung da dat OMP_NUM_THREADS thi giu nguyen.
-    os.environ.setdefault("OMP_NUM_THREADS", str(max(1, (os.cpu_count() or 1) // workers)))
-    print(f"Quet song song: {workers} tien trinh, {n_seg} doan, OMP_NUM_THREADS={os.environ['OMP_NUM_THREADS']}",
-          file=sys.stderr)
-    ctx = multiprocessing.get_context(os.environ.get("HARDSUB_MP_START") or None)
-    samples, skipped, total = [], 0, 0
-    with ctx.Pool(workers, initializer=_init_scan_worker, initargs=(cfg,)) as pool:
-        for part, sk, tot in pool.imap(_scan_job, jobs):           # imap: dung thu tu doan, doan xong truoc cung giao viec tiep
-            samples.extend(part)
-            skipped += sk
-            total += tot
-    return samples, skipped, total
-
-
 def main():
     ap = argparse.ArgumentParser(description="Bóc hardsub tiếng Trung từ video ra file .srtpx")
     ap.add_argument("video", help="Đường dẫn file video đầu vào")
@@ -1852,11 +1417,8 @@ def main():
                     help="tesseract='chi_sim'/'chi_tra', paddleocr='ch'/'chinese_cht', easyocr='ch_sim'/'ch_tra'")
     ap.add_argument("--scale", type=float, default=2.0, help="Phóng to ROI trước khi OCR")
     ap.add_argument("--min-conf", type=float, default=0.6, help="Ngưỡng tin cậy OCR tối thiểu (0..1)")
-    ap.add_argument("--skip-start", type=float, default=0.2,
-                    help="Bỏ chữ ở N giây đầu video (mặc định 0.2): khung đầu thường là ảnh bìa/thumbnail có chữ tiêu đề, "
-                         "không phải phụ đề. 0 = tắt")
-    ap.add_argument("--min-height", type=float, default=0.06,
-                    help="Chỉ lấy chữ cao ít nhất tỉ lệ này so với chiều cao video (mặc định 0.06 = 6%%, phụ đề thường cao ~8-11%%); "
+    ap.add_argument("--min-height", type=float, default=0.035,
+                    help="Chỉ lấy chữ cao ít nhất tỉ lệ này so với chiều cao video (mặc định 0.035 = 3.5%%); "
                          "chữ nhỏ li ti trong bảng/giao diện bị bỏ. 0 = tắt")
     ap.add_argument("--min-chars", type=int, default=2,
                     help="Một khối chữ phải có ít nhất ngần này chữ mới được lấy (mặc định 2)")
@@ -1900,24 +1462,6 @@ def main():
     ap.add_argument("--tilt", type=float, default=2.0,
                     help="Chu nghieng tu so do nay tro len thi thay hop den to bang chuoi hop nho doc theo duong cheo "
                          "(chi cho chu dung yen, can goc da giac cua OCR: paddleocr/easyocr), 0 = tat")
-    ap.add_argument("--workers", type=int, default=1,
-                    help="So tien trinh OCR chay song song (mac dinh 1). Video duoc chia thanh nhieu doan lien tiep (gap 3 lan so tien "
-                         "trinh de can tai), moi tien trinh nap mo hinh rieng (ton RAM gap N lan) roi ghep lai TRUOC buoc gom cau nen "
-                         "cau nam giua hai doan van la mot cau. Nen dat <= so nhan CPU / 2; OMP_NUM_THREADS tu chia deu neu chua dat")
-    ap.add_argument("--no-skip", action="store_true",
-                    help="Tat bo qua khung khong doi (mac dinh bat: khung gan nhu giong khung OCR gan nhat thi dung lai ket qua cu "
-                         "thay vi OCR lai, nhanh hon nhieu khi chu dung yen; nen dong / chu chuyen dong thi van OCR tung khung)")
-    ap.add_argument("--skip-diff", type=float, default=0.05,
-                    help="Bo qua khung neu ty le diem anh doi (tren anh thu nho, lam mo) < so nay %% (mac dinh 0.05). "
-                         "Lon hon = bo qua nhieu hon, nhanh hon nhung co the bo sot chu moi hien nho/mo")
-    ap.add_argument("--skip-max", type=int, default=8,
-                    help="Toi da so khung lien tiep bo qua truoc khi bat buoc OCR lai (mac dinh 8)")
-    ap.add_argument("--det-side", type=int, default=640,
-                    help="paddleocr: canh dai toi da (px) cua anh dua vao bo do chu, anh lon hon bi thu ve (mac dinh 640; "
-                         "PaddleOCR goc la 960). Nho = nhanh hon, nhung chu nho li ti de bi bo sot; chu cao >= 3,5%% khung hinh thi on")
-    ap.add_argument("--angle-cls", action="store_true",
-                    help="paddleocr: bat bo phan loai huong 0/180 do cho tung o chu (mac dinh tat vi cham them; chu nghieng "
-                         "lay goc tu da giac do chu). Bat neu video co chu bi lat nguoc")
     ap.add_argument("--no-tighten", action="store_true",
                     help="Tat buoc siet hop OCR theo net chu that (mac dinh bat: cat nen thua o mep hop, "
                          "mo rong neu chu bi cat; chi ap dung cho chu thang)")
@@ -1950,28 +1494,27 @@ def main():
     if args.debug_dir:
         os.makedirs(args.debug_dir, exist_ok=True)
 
-    cfg = dict(engine=args.engine, lang=args.lang, min_conf=args.min_conf, det_side=args.det_side,
-               use_cls=args.angle_cls, roi_px=roi_px, scale=args.scale, cjk_only=not args.keep_non_cjk,
-               min_h=args.min_height * h, min_chars=args.min_chars, tighten=not args.no_tighten,
-               skip=not (args.no_skip or args.skip_diff <= 0), skip_diff=args.skip_diff,
-               skip_max=max(0, args.skip_max), debug_dir=args.debug_dir, debug_every=args.debug_every)
+    engine = OcrEngine(engine=args.engine, lang=args.lang, min_conf=args.min_conf)
 
-    res = scan_parallel(args.video, args.fps, info, args.workers, cfg) if args.workers > 1 else None
-    if res is None:
-        if args.workers > 1:
-            print("Video qua ngan hoac khong biet so khung -> quet mot mach", file=sys.stderr)
-        engine = OcrEngine(engine=args.engine, lang=args.lang, min_conf=args.min_conf,
-                           det_side=args.det_side, use_cls=args.angle_cls)
-        res = scan_samples(engine, args.video, args.fps, 0, None, cfg)
-    samples, skipped, total = res
-    if args.skip_start > 0:
-        # Giu nguyen luoi thoi gian, chi xoa chu o khung dau (anh bia/thumbnail) de khong thanh phu de.
-        n_cov = sum(1 for t, b in samples if t < args.skip_start and b)
-        samples = [(t, [] if t < args.skip_start else b) for t, b in samples]
-        if n_cov:
-            print(f"Bo chu o {args.skip_start:g}s dau (anh bia): {n_cov} khung", file=sys.stderr)
-    if cfg["skip"]:
-        print(f"Bo qua OCR {skipped}/{total} khung giong khung truoc (OCR {total - skipped} khung)", file=sys.stderr)
+    samples = []
+    processed = 0
+    for t, frame in iter_frames(args.video, args.fps):
+        roi_img = frame[ry0:ry1, rx0:rx1]
+        if args.scale != 1.0:
+            roi_img = cv2.resize(roi_img, None, fx=args.scale, fy=args.scale,
+                                 interpolation=cv2.INTER_CUBIC)
+        blocks = detect_frame_blocks(engine, roi_img, (rx0, ry0), args.scale,
+                                     cjk_only=not args.keep_non_cjk, min_h=args.min_height * h,
+                                     min_chars=args.min_chars, tighten=not args.no_tighten)
+        samples.append((t, blocks))
+
+        if args.debug_dir and processed % args.debug_every == 0:
+            save_debug_frame(frame, roi_px, blocks,
+                             os.path.join(args.debug_dir, f"f_{processed:06d}.jpg"))
+        processed += 1
+        if processed % 100 == 0:
+            print(f"...đã xử lý {processed} frame (t={t:.1f}s)", file=sys.stderr)
+
     tracks = build_tracks(samples, step_sec, similarity=args.similarity,
                           max_gap_frames=args.max_gap_frames, min_frames=args.min_frames,
                           merge_sim=args.merge_sim, split_sim=args.split_sim, min_run_sec=args.min_run_sec)

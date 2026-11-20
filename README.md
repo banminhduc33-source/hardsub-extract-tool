@@ -52,19 +52,12 @@ Fps càng cao thì mốc thời gian càng sát (fps cao khớp mẫu nhất) nh
 | `--kf-tol` | Khung lệch quá số pixel này thì tính là chuyển động (mặc định 6) |
 | `--stable-sec` | Khung giữ yên ít nhất số giây này mới là khung ổn định chính (mặc định 0.5) |
 | `--min-frames` / `--max-gap-frames` | Lọc nhiễu / chịu được OCR chớp tắt |
-| `--skip-start` | Bỏ chữ ở N giây đầu video (mặc định 0.2): khung đầu thường là ảnh bìa/thumbnail có chữ tiêu đề, không phải phụ đề; `0` = tắt |
-| `--min-height` | Chỉ lấy chữ cao ít nhất tỉ lệ này so với chiều cao video (mặc định 0.06 = 6%; phụ đề thường cao ~8-11%, chữ UI/game nhỏ hơn bị bỏ), bỏ chữ li ti trong bảng/giao diện; `0` = tắt |
+| `--min-height` | Chỉ lấy chữ cao ít nhất tỉ lệ này so với chiều cao video (mặc định 0.035 = 3.5%), bỏ chữ li ti trong bảng/giao diện; `0` = tắt |
 | `--min-chars` | Khối chữ phải có ít nhất ngần này chữ mới lấy (mặc định 2) |
 | `--no-poly-secondary` | Tắt chế độ "mọi phụ đề phụ đều là đa giác" (mặc định **bật**, chỉ với `--tilt-mode quad`): khi bật, mọi câu **không** thuộc phụ đề chính đều xuất dòng `Đa giác:` / `KP` (kể cả chữ thẳng, cột chữ dọc, câu ngắn, thẻ chữ bay + xoay); phụ đề chính vẫn là hộp chữ nhật đen. Khi tắt, chỉ chữ nghiêng từ `--tilt` độ trở lên mới thành đa giác |
 | `--tilt` | Chữ nghiêng từ ngần này độ trở lên (mặc định 2, `0` = tắt) thì thay hộp đen to bằng 1 hộp chính (có chữ) + chuỗi hộp nhỏ không chữ chạy theo đường chéo. Dùng được cả khi chữ **vừa nghiêng/xoay vừa chuyển động** (mỗi hộp có KF riêng) và khi chữ nghiêng tới 80°; cần engine có góc đa giác (paddleocr/easyocr) |
 | `--pad` | Nở hộp đen ra mỗi phía = số này × chiều cao 1 dòng chữ, để che hết viền/bóng chữ (mặc định 0.05, tối thiểu 2px: hộp sát chữ; `0` = tắt) |
 | `--join-gap` | 2 câu liên tiếp (cùng hàng) cách nhau ≤ số giây này thì nối đuôi câu trước vào đầu câu sau (mặc định 0.5, `0` = tắt) |
-| `--workers` | Số tiến trình OCR chạy song song (mặc định 1). Video chia thành các đoạn liên tiếp (gấp 3 lần số tiến trình để cân tải), mỗi tiến trình nạp mô hình riêng (tốn RAM gấp N lần) rồi ghép lại **trước** bước gom câu nên câu nằm giữa hai đoạn vẫn là một câu; kết quả giống hệt chạy một mạch khi `--no-skip` (khi bật bỏ qua khung thì chỉ khác ở khung đầu mỗi đoạn luôn được OCR). Nên đặt ≤ số nhân CPU / 2 (mỗi tiến trình dùng `OMP_NUM_THREADS` luồng, tự chia đều nếu chưa đặt). Không có lợi trên máy 2 nhân. Mỗi đoạn phải đọc lướt qua phần video trước nó (chỉ giải mã, không OCR) nên tốn thêm một ít thời gian giải mã |
-| `--no-skip` | Tắt bỏ qua khung không đổi (mặc định **bật**: khung gần như giống khung đã OCR gần nhất thì dùng lại kết quả cũ thay vì OCR lại; chữ hardsub thường đứng yên cả giây nên nhanh hơn nhiều. Chữ mới hiện, chữ chuyển động, nền động vẫn OCR từng khung) |
-| `--skip-diff` | Bỏ qua khung nếu tỉ lệ điểm ảnh đổi (trên ảnh thu nhỏ, làm mờ) nhỏ hơn số này, tính theo % (mặc định 0.05). Lớn hơn = nhanh hơn nhưng có thể sót chữ nhỏ/mờ mới hiện |
-| `--skip-max` | Tối đa số khung liên tiếp được bỏ qua trước khi bắt buộc OCR lại (mặc định 8) |
-| `--det-side` | paddleocr: cạnh dài tối đa (px) của ảnh đưa vào bộ dò chữ (mặc định 640, PaddleOCR gốc 960). Nhỏ = nhanh hơn nhưng chữ nhỏ li ti dễ bị sót |
-| `--angle-cls` | paddleocr: bật bộ phân loại hướng 0/180° cho từng ô chữ (mặc định tắt vì chậm thêm; chữ nghiêng lấy góc từ đa giác dò chữ). Bật nếu video có chữ bị lật ngược |
 | `--no-tighten` | Tắt bước siết hộp OCR theo nét chữ thật (mặc định bật: cắt nền thừa ở mép hộp, mở rộng nếu chữ bị cắt mất; chỉ áp dụng cho chữ thẳng) |
 | `--split-sim` | 2 đoạn chữ ổn định kề nhau trong cùng 1 câu mà giống nhau < số này (mặc định 0.85) thì **tách thành 2 câu** (trước đây câu liền kề giống ≥60% bị gộp thành 1). `0` = tắt |
 | `--min-run-sec` | Một nội dung phải ổn định ít nhất số giây này mới tính là 1 câu riêng khi tách (mặc định 0.3) |

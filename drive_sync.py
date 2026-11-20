@@ -14,7 +14,7 @@ Cài đặt:
 Chạy:
     python drive_sync.py                 # chạy liên tục, quét mỗi 30 giây
     python drive_sync.py --once          # quét một lần rồi thoát
-    python drive_sync.py --extract-args "--engine paddleocr --lang ch --fps 12"
+    python drive_sync.py --extract-args "--engine paddleocr --lang ch --fps 12 --roi 0,0.75,1,1"
 """
 import argparse
 import os

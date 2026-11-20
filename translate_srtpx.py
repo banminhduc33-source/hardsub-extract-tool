@@ -42,14 +42,6 @@ PROMPT = (
 )
 
 
-UI_EXTRA = (
-    " LƯU Ý: đây là chữ trên GIAO DIỆN GAME (menu, nút bấm, tên vật phẩm/kỹ năng, mô tả, thông báo), không phải lời thoại. "
-    "Mỗi phần tử là một nhãn/đoạn chữ riêng nên có thể rất ngắn hoặc cụt; dịch đúng thuật ngữ game quen thuộc với người chơi Việt, "
-    "NGẮN GỌN nhất có thể (bản dịch phải vừa đúng khung chữ gốc, không dài hơn nhiều), giữ nguyên số, ký hiệu, đơn vị, %, mũi tên."
-)
-UI_MODE = False
-
-
 def log(msg):
     print(msg, flush=True)
 
@@ -171,7 +163,7 @@ def call_gemini(key, model, texts, timeout):
     body = {
         "contents": [{
             "role": "user",
-            "parts": [{"text": PROMPT.format(n=len(texts)) + (UI_EXTRA if UI_MODE else "") + glossary_block(texts)
+            "parts": [{"text": PROMPT.format(n=len(texts)) + glossary_block(texts)
                        + "\n\n" + json.dumps(texts, ensure_ascii=False)}],
         }],
         "generationConfig": {"temperature": 0.3, "responseMimeType": "application/json"},
@@ -261,11 +253,7 @@ def main():
     ap.add_argument("--keep-original", help="Luu ban chua dich vao duong dan nay")
     ap.add_argument("--model", default=os.environ.get("GEMINI_MODEL", "gemini-4-hydrogen"))
     ap.add_argument("--timeout", type=int, default=300)
-    ap.add_argument("--ui", action="store_true",
-                    help="Chu tren giao dien game (nhan/nut/ky nang, ngan, khong phai loi thoai): dich ngan gon dung thuat ngu game")
     args = ap.parse_args()
-    global UI_MODE
-    UI_MODE = args.ui
 
     keys = load_keys()
     if not keys:

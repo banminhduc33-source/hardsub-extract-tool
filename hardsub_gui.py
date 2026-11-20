@@ -59,7 +59,6 @@ class App(tk.Tk):
         self.fps = tk.StringVar(value="12")
         self.debug = tk.BooleanVar(value=True)
         self.translate = tk.BooleanVar(value=False)
-        self.ui_text = tk.BooleanVar(value=False)
 
         rows = [
             ("Công cụ đọc chữ:", ttk.Combobox(opt, textvariable=self.engine, values=list(ENGINES), state="readonly", width=44)),
@@ -71,8 +70,6 @@ class App(tk.Tk):
             w.grid(row=i, column=1, sticky="w", padx=8)
         ttk.Checkbutton(opt, text="Lưu ảnh kiểm tra (có kẻ khung đỏ quanh chữ) vào thư mục 'debug' cạnh file kết quả",
                         variable=self.debug).grid(row=len(rows), column=0, columnspan=2, sticky="w", padx=8, pady=4)
-        ttk.Checkbutton(opt, text="Video là giao diện game nhiều chữ nhỏ (lấy cả chữ nhỏ, dịch ngắn gọn theo thuật ngữ game)",
-                        variable=self.ui_text).grid(row=len(rows) + 2, column=0, columnspan=2, sticky="w", padx=8, pady=4)
         ttk.Checkbutton(opt, text="Dịch sang tiếng Việt sau khi bóc (cần file keys.txt cạnh chương trình, mỗi dòng 1 API key Gemini)",
                         variable=self.translate).grid(row=len(rows) + 1, column=0, columnspan=2, sticky="w", padx=8, pady=4)
 
@@ -141,8 +138,6 @@ class App(tk.Tk):
         cmd = [sys.executable, "-u", SCRIPT, video, "-o", out,
                "--engine", engine, "--lang", LANG_CODES[(engine, self.script.get())],
                "--fps", str(fps), "--roi", FULL_FRAME_ROI]
-        if self.ui_text.get():
-            cmd += ["--ui-text"]
         if self.debug.get():
             cmd += ["--debug-dir", os.path.join(os.path.dirname(out) or ".", "debug"), "--debug-every", "20"]
 
@@ -154,8 +149,6 @@ class App(tk.Tk):
                 return
             self.translate_cmd = [sys.executable, "-u", TRANSLATE_SCRIPT, out,
                                   "--keep-original", os.path.splitext(out)[0] + ".zh.srtpx"]
-            if self.ui_text.get():
-                self.translate_cmd += ["--ui"]
 
         self.say("\n=== Bắt đầu (lần đầu có thể mất vài phút để tải model OCR) ===\n")
         self.btn_run.configure(state="disabled")

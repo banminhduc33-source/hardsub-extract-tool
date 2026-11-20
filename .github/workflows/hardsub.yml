@@ -36,10 +36,6 @@ on:
       model:
         description: "Model Gemini dung de dich"
         default: "gemini-4-hydrogen"
-      ui_text:
-        description: "Video la giao dien game nhieu chu nho: lay ca chu nho (--ui-text), dich ngan gon theo thuat ngu game (--ui)"
-        type: boolean
-        default: false
       retranslate:
         description: "Dich LAI bang ban Trung da co (output/*.zh.srtpx) voi bang ten glossary.txt, KHONG boc lai video. De trong video_path = dich lai tat ca; hoac ghi vd in/tap1.mp4 de chi dich lai tap do"
         type: boolean
@@ -155,7 +151,6 @@ jobs:
           ROI: "0,0,1.0,1.0"   # luon OCR toan bo khung hinh
           LANG_CODE: ${{ inputs.lang || 'ch' }}
           TRANSLATE: ${{ github.event_name == 'workflow_dispatch' && inputs.translate == false && 'false' || 'true' }}
-          UI_TEXT: ${{ github.event_name == 'workflow_dispatch' && inputs.ui_text == true && 'true' || 'false' }}
           RETRANSLATE: ${{ github.event_name == 'workflow_dispatch' && inputs.retranslate == true && 'true' || 'false' }}
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
           # Mac dinh gemini-4-hydrogen (bo qua bien repo GEMINI_MODEL cu de khoi dinh nham model da ngung)
@@ -170,8 +165,6 @@ jobs:
           mkdir -p work out output in
           : > work/queue.txt
           FAILED_TRANSLATE=0
-          OCR_FLAGS=""; TR_FLAGS=""
-          if [ "$UI_TEXT" = "true" ]; then OCR_FLAGS="--ui-text"; TR_FLAGS="--ui"; fi
 
           # ---------- Ham tro giup: dem chu Han trong file ----------
           han_count() {
@@ -203,7 +196,7 @@ jobs:
               cp "$zh" "$target"   # luon dich tu ban Trung nguyen ven
               echo ">>> Dich lan $n: $name | model=$GEMINI_MODEL | chu Han goc=$zh_han"
               if timeout "${TRANSLATE_ATTEMPT_MIN}m" python translate_srtpx.py "$target" \
-                   --model "$GEMINI_MODEL" $TR_FLAGS < /dev/null; then
+                   --model "$GEMINI_MODEL" < /dev/null; then
                 left=$(han_count "$target")
                 if [ $((left * 100)) -le $((zh_han * 10)) ]; then
                   echo "Da dich xong: $name (lan $n, con $left/$zh_han chu Han)"
@@ -326,7 +319,7 @@ jobs:
               exit 1
             fi
             python hardsub_extract.py "$SRC" -o "out/$NAME.srtpx" \
-              --engine paddleocr --lang "$LANG_CODE" --fps "$FPS" --roi "$ROI" --workers "$WORKERS" $OCR_FLAGS \
+              --engine paddleocr --lang "$LANG_CODE" --fps "$FPS" --roi "$ROI" --workers "$WORKERS" \
               --debug-dir "out/debug_$NAME" --debug-every 50 < /dev/null
 
             # ---- Dich Trung -> Viet bang Gemini (thu lai den khi duoc) ----

@@ -274,15 +274,28 @@ class OcrEngine:
             lines[key].append((txt, x, y, x + w, y + h, conf / 100.0))
 
         out = []
+        cjk = self.lang.startswith("chi")
         for key, words in lines.items():
             words.sort(key=lambda w: w[1])
-            text = "".join(w[0] for w in words) if self.lang.startswith("chi") else " ".join(w[0] for w in words)
-            x_min = min(w[1] for w in words)
-            y_min = min(w[2] for w in words)
-            x_max = max(w[3] for w in words)
-            y_max = max(w[4] for w in words)
-            conf = statistics.mean(w[5] for w in words)
-            out.append(dict(text=text, x_min=x_min, x_max=x_max, y_min=y_min, y_max=y_max, conf=conf))
+            # Tu NHIEU bat thuong (cao hon han cac tu con lai: bieu tuong / net nen doc nham thanh chu) keo hop phinh to -> bo
+            if len(words) >= 3:
+                hmed = statistics.median(w[4] - w[2] for w in words)
+                words = [w for w in words if (w[4] - w[2]) <= 1.8 * hmed] or words
+            # Tesseract coi 2 cum chu cach xa nhau (2 bang / 2 cot) tren cung hang la 1 dong -> tach tai khoang trong lon, moi cum 1 hop
+            hmed = max(statistics.median(w[4] - w[2] for w in words), 1.0)
+            segs, cur = [], [words[0]]
+            for w in words[1:]:
+                if w[1] - max(x[3] for x in cur) > 2.0 * hmed:
+                    segs.append(cur)
+                    cur = [w]
+                else:
+                    cur.append(w)
+            segs.append(cur)
+            for seg in segs:
+                text = "".join(w[0] for w in seg) if cjk else " ".join(w[0] for w in seg)
+                out.append(dict(text=text, x_min=min(w[1] for w in seg), x_max=max(w[3] for w in seg),
+                                y_min=min(w[2] for w in seg), y_max=max(w[4] for w in seg),
+                                conf=statistics.mean(w[5] for w in seg)))
         return out
 
 

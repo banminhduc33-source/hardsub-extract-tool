@@ -259,7 +259,7 @@ def main():
     ap.add_argument("input", help="File .srtpx can dich")
     ap.add_argument("-o", "--output", help="File dau ra (mac dinh ghi de len file vao)")
     ap.add_argument("--keep-original", help="Luu ban chua dich vao duong dan nay")
-    ap.add_argument("--model", default=os.environ.get("GEMINI_MODEL", "gemini-4-hydrogen"))
+    ap.add_argument("--model", default=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite"))
     ap.add_argument("--timeout", type=int, default=300)
     ap.add_argument("--ui", action="store_true",
                     help="Chu tren giao dien game (nhan/nut/ky nang, ngan, khong phai loi thoai): dich ngan gon dung thuat ngu game")

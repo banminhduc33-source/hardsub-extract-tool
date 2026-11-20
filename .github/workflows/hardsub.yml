@@ -35,7 +35,7 @@ on:
         default: true
       model:
         description: "Model Gemini dung de dich"
-        default: "gemini-4-hydrogen"
+        default: "gemini-3.5-flash-lite"
       ui_text:
         description: "Video la giao dien game nhieu chu nho: lay ca chu nho (--ui-text), dich ngan gon theo thuat ngu game (--ui)"
         type: boolean
@@ -158,8 +158,8 @@ jobs:
           UI_TEXT: ${{ github.event_name == 'workflow_dispatch' && inputs.ui_text == true && 'true' || 'false' }}
           RETRANSLATE: ${{ github.event_name == 'workflow_dispatch' && inputs.retranslate == true && 'true' || 'false' }}
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
-          # Mac dinh gemini-4-hydrogen (bo qua bien repo GEMINI_MODEL cu de khoi dinh nham model da ngung)
-          GEMINI_MODEL: ${{ inputs.model || 'gemini-4-hydrogen' }}
+          # Mac dinh gemini-3.5-flash-lite (bo qua bien repo GEMINI_MODEL cu de khoi dinh nham model da ngung)
+          GEMINI_MODEL: ${{ inputs.model || 'gemini-3.5-flash-lite' }}
           # Tong thoi gian toi da de thu dich lai cho MOI video (phut) va thoi gian toi da moi lan thu (phut)
           TRANSLATE_MAX_MIN: "150"
           TRANSLATE_ATTEMPT_MIN: "30"

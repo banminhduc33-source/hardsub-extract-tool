@@ -100,5 +100,5 @@ sm = [(k * step, H.build_blocks([blk("僭续试炼统一考卷", bbox(poly_of(70
 out = H.format_srtpx(H.build_tracks(sm, step), 1440, 1080, step, tilt_deg=0.0, poly_secondary=True)
 kf = re.findall(r"KF ([\d.]+)s:", out)
 kp = re.findall(r"KP ([\d.]+)s:", out)
-assert len(kf) >= 5 and kp == kf, out
+assert len(kf) >= 2 and kp == kf, out        # truot thang deu: simplify_kfs gon con vai KF (khong can KF moi khung hinh)
 print("OK")

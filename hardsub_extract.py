@@ -1852,8 +1852,8 @@ def main():
                     help="tesseract='chi_sim'/'chi_tra', paddleocr='ch'/'chinese_cht', easyocr='ch_sim'/'ch_tra'")
     ap.add_argument("--scale", type=float, default=2.0, help="Phóng to ROI trước khi OCR")
     ap.add_argument("--min-conf", type=float, default=0.6, help="Ngưỡng tin cậy OCR tối thiểu (0..1)")
-    ap.add_argument("--min-height", type=float, default=0.035,
-                    help="Chỉ lấy chữ cao ít nhất tỉ lệ này so với chiều cao video (mặc định 0.035 = 3.5%%); "
+    ap.add_argument("--min-height", type=float, default=0.06,
+                    help="Chỉ lấy chữ cao ít nhất tỉ lệ này so với chiều cao video (mặc định 0.06 = 6%%, phụ đề thường cao ~8-11%%); "
                          "chữ nhỏ li ti trong bảng/giao diện bị bỏ. 0 = tắt")
     ap.add_argument("--min-chars", type=int, default=2,
                     help="Một khối chữ phải có ít nhất ngần này chữ mới được lấy (mặc định 2)")

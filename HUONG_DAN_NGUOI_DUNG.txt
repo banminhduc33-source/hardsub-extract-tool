@@ -10,12 +10,11 @@ CÀI MỘT LẦN (Windows):
 
 DÙNG:
   1. Bấm "Chọn file..." -> chọn video.
-  2. (Tuỳ chọn) đổi vùng phụ đề / loại chữ Hán.
+  2. (Tuỳ chọn) đổi loại chữ Hán.
   3. Bấm BẮT ĐẦU. Chờ chạy xong.
   4. Bấm "Mở thư mục kết quả" -> lấy file .srtpx (cạnh video).
   5. Mở vài ảnh trong thư mục "debug": khung ĐỎ phải bao đúng chữ phụ đề.
-     Mặc định quét toàn bộ khung hình. Muốn nhanh hơn thì đổi "Vùng có phụ đề" thành
-     "Dải dưới 25%" rồi chạy lại.
+     Công cụ luôn OCR toàn bộ khung hình (không giới hạn vùng phụ đề).
 
 MẸO:
   - Video dài: giảm "số khung hình/giây" xuống 10 cho nhanh.

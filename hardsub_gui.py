@@ -13,12 +13,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, "hardsub_extract.py")
 TRANSLATE_SCRIPT = os.path.join(HERE, "translate_srtpx.py")
 
-ROI_PRESETS = {
-    "Toàn bộ khung hình (mặc định, chậm hơn)": "0,0,1.0,1.0",
-    "Dải dưới 25% (phụ đề thường nằm đây, nhanh hơn)": "0,0.75,1.0,1.0",
-    "Dải dưới 35% (phụ đề cao hơn một chút)": "0,0.65,1.0,1.0",
-    "Dải giữa-dưới (từ 50% xuống dưới)": "0,0.5,1.0,1.0",
-}
+FULL_FRAME_ROI = "0,0,1.0,1.0"   # luôn OCR toàn bộ khung hình
 ENGINES = {
     "PaddleOCR (chính xác nhất, khuyên dùng)": "paddleocr",
     "EasyOCR (dễ cài hơn, chậm hơn)": "easyocr",
@@ -61,7 +56,6 @@ class App(tk.Tk):
         opt.pack(fill="x", **pad)
         self.engine = tk.StringVar(value=list(ENGINES)[0])
         self.script = tk.StringVar(value="Giản thể")
-        self.roi = tk.StringVar(value=list(ROI_PRESETS)[0])
         self.fps = tk.StringVar(value="12")
         self.debug = tk.BooleanVar(value=True)
         self.translate = tk.BooleanVar(value=False)
@@ -69,7 +63,6 @@ class App(tk.Tk):
         rows = [
             ("Công cụ đọc chữ:", ttk.Combobox(opt, textvariable=self.engine, values=list(ENGINES), state="readonly", width=44)),
             ("Loại chữ Hán:", ttk.Combobox(opt, textvariable=self.script, values=["Giản thể", "Phồn thể"], state="readonly", width=44)),
-            ("Vùng có phụ đề:", ttk.Combobox(opt, textvariable=self.roi, values=list(ROI_PRESETS), state="readonly", width=44)),
             ("Số khung hình/giây quét (nhỏ = nhanh):", ttk.Spinbox(opt, from_=1, to=60, textvariable=self.fps, width=10)),
         ]
         for i, (label, w) in enumerate(rows):
@@ -144,7 +137,7 @@ class App(tk.Tk):
         engine = ENGINES[self.engine.get()]
         cmd = [sys.executable, "-u", SCRIPT, video, "-o", out,
                "--engine", engine, "--lang", LANG_CODES[(engine, self.script.get())],
-               "--fps", str(fps), "--roi", ROI_PRESETS[self.roi.get()]]
+               "--fps", str(fps), "--roi", FULL_FRAME_ROI]
         if self.debug.get():
             cmd += ["--debug-dir", os.path.join(os.path.dirname(out) or ".", "debug"), "--debug-every", "20"]
 

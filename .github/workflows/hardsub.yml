@@ -23,9 +23,6 @@ on:
       fps:
         description: "So khung hinh/giay quet (nho = nhanh)"
         default: "12"
-      roi:
-        description: "Vung quet x1,y1,x2,y2 (0,0,1.0,1.0 = toan khung hinh)"
-        default: "0,0,1.0,1.0"
       lang:
         description: "ch = gian the, chinese_cht = phon the"
         default: "ch"
@@ -147,7 +144,7 @@ jobs:
           VIDEO_URL: ${{ inputs.video_url }}
           VIDEO_PATH: ${{ inputs.video_path }}
           FPS: ${{ inputs.fps || '12' }}
-          ROI: ${{ inputs.roi || '0,0,1.0,1.0' }}
+          ROI: "0,0,1.0,1.0"   # luon OCR toan bo khung hinh
           LANG_CODE: ${{ inputs.lang || 'ch' }}
           TRANSLATE: ${{ github.event_name == 'workflow_dispatch' && inputs.translate == false && 'false' || 'true' }}
           RETRANSLATE: ${{ github.event_name == 'workflow_dispatch' && inputs.retranslate == true && 'true' || 'false' }}

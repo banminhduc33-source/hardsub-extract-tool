@@ -58,6 +58,11 @@ Fps càng cao thì mốc thời gian càng sát (fps cao khớp mẫu nhất) nh
 | `--tilt` | Chữ nghiêng từ ngần này độ trở lên (mặc định 2, `0` = tắt) thì thay hộp đen to bằng 1 hộp chính (có chữ) + chuỗi hộp nhỏ không chữ chạy theo đường chéo. Dùng được cả khi chữ **vừa nghiêng/xoay vừa chuyển động** (mỗi hộp có KF riêng) và khi chữ nghiêng tới 80°; cần engine có góc đa giác (paddleocr/easyocr) |
 | `--pad` | Nở hộp đen ra mỗi phía = số này × chiều cao 1 dòng chữ, để che hết viền/bóng chữ (mặc định 0.05, tối thiểu 2px: hộp sát chữ; `0` = tắt) |
 | `--join-gap` | 2 câu liên tiếp (cùng hàng) cách nhau ≤ số giây này thì nối đuôi câu trước vào đầu câu sau (mặc định 0.5, `0` = tắt) |
+| `--no-skip` | Tắt bỏ qua khung không đổi (mặc định **bật**: khung gần như giống khung đã OCR gần nhất thì dùng lại kết quả cũ thay vì OCR lại; chữ hardsub thường đứng yên cả giây nên nhanh hơn nhiều. Chữ mới hiện, chữ chuyển động, nền động vẫn OCR từng khung) |
+| `--skip-diff` | Bỏ qua khung nếu tỉ lệ điểm ảnh đổi (trên ảnh thu nhỏ, làm mờ) nhỏ hơn số này, tính theo % (mặc định 0.05). Lớn hơn = nhanh hơn nhưng có thể sót chữ nhỏ/mờ mới hiện |
+| `--skip-max` | Tối đa số khung liên tiếp được bỏ qua trước khi bắt buộc OCR lại (mặc định 8) |
+| `--det-side` | paddleocr: cạnh dài tối đa (px) của ảnh đưa vào bộ dò chữ (mặc định 640, PaddleOCR gốc 960). Nhỏ = nhanh hơn nhưng chữ nhỏ li ti dễ bị sót |
+| `--angle-cls` | paddleocr: bật bộ phân loại hướng 0/180° cho từng ô chữ (mặc định tắt vì chậm thêm; chữ nghiêng lấy góc từ đa giác dò chữ). Bật nếu video có chữ bị lật ngược |
 | `--no-tighten` | Tắt bước siết hộp OCR theo nét chữ thật (mặc định bật: cắt nền thừa ở mép hộp, mở rộng nếu chữ bị cắt mất; chỉ áp dụng cho chữ thẳng) |
 | `--split-sim` | 2 đoạn chữ ổn định kề nhau trong cùng 1 câu mà giống nhau < số này (mặc định 0.85) thì **tách thành 2 câu** (trước đây câu liền kề giống ≥60% bị gộp thành 1). `0` = tắt |
 | `--min-run-sec` | Một nội dung phải ổn định ít nhất số giây này mới tính là 1 câu riêng khi tách (mặc định 0.3) |

@@ -38,6 +38,7 @@ VI DU:
 """
 
 import argparse
+import copy
 import math
 import collections
 import difflib
@@ -85,6 +86,48 @@ def iter_frames(video_path, target_fps):
     cap.release()
 
 
+class FrameSkipper:
+    """Bo qua OCR o khung gan nhu GIONG khung da OCR gan nhat (dung lai ket qua cu): OCR la buoc cham nhat, ma chu hardsub
+    thuong dung yen ca giay.
+
+    So sanh voi khung da OCR GAN NHAT (khong phai khung ngay truoc) nen thay doi tu tu (chu mo dan) cong don den khi vuot nguong
+    thi OCR lai. Anh vung quet duoc thu nho (`thumb_w` px ngang), lam mo roi dem ty le diem anh lech hon `pix_thr` muc xam;
+    chi can ty le do >= `diff_pct` % la OCR lai. Nen dat nguong nho hon dien tich vai chu (~0,2% khung hinh) de chu moi hien
+    khong bi bo qua. `max_skip`: toi da so khung lien tiep duoc bo qua, het so do thi OCR lai du anh khong doi.
+
+    Chu dang chuyen dong, hoac nen dong (nhan vat dong, hieu ung) lam anh doi nhieu -> khong bo qua, chay nhu cu."""
+
+    def __init__(self, diff_pct=0.05, max_skip=8, thumb_w=480, pix_thr=20):
+        self.diff_pct = diff_pct
+        self.max_skip = max_skip
+        self.thumb_w = thumb_w
+        self.pix_thr = pix_thr
+        self._ref = None
+        self._run = 0
+        self.skipped = 0
+        self.total = 0
+
+    def _sig(self, img_bgr):
+        g = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY) if img_bgr.ndim == 3 else img_bgr
+        h, w = g.shape[:2]
+        if w > self.thumb_w:
+            g = cv2.resize(g, (self.thumb_w, max(1, round(h * self.thumb_w / w))), interpolation=cv2.INTER_AREA)
+        return cv2.GaussianBlur(g, (5, 5), 0)
+
+    def should_skip(self, img_bgr):
+        """True: khung nay giong khung OCR gan nhat, dung lai ket qua cu. False: phai OCR (va khung nay thanh moc so sanh moi)."""
+        self.total += 1
+        sig = self._sig(img_bgr)
+        if self._ref is not None and self._ref.shape == sig.shape and self._run < self.max_skip:
+            changed = float((cv2.absdiff(sig, self._ref) > self.pix_thr).sum()) / sig.size
+            if changed * 100.0 < self.diff_pct:
+                self._run += 1
+                self.skipped += 1
+                return True
+        self._ref, self._run = sig, 0
+        return False
+
+
 def seconds_to_srt_ts(t):
     if t < 0:
         t = 0
@@ -130,10 +173,15 @@ class OcrEngine:
     crop ROI và có thể đã phóng to theo `scale`).
     """
 
-    def __init__(self, engine="tesseract", lang="chi_sim", min_conf=0.4):
+    def __init__(self, engine="tesseract", lang="chi_sim", min_conf=0.4, det_side=960, use_cls=True):
+        """det_side (chi paddleocr): canh dai toi da (px) cua anh dua vao bo DO CHU; anh lon hon bi thu ve. Nho = nhanh hon, nhung
+        chu nho li ti de bi bo sot (PaddleOCR mac dinh 960). use_cls (chi paddleocr): chay bo phan loai huong 0/180 do cho tung o chu
+        (cham them; chu nghieng lay goc tu da giac do chu nen thuong khong can)."""
         self.engine = engine
         self.lang = lang
         self.min_conf = min_conf
+        self.det_side = det_side
+        self.use_cls = use_cls
         self._backend = None
 
         if engine == "paddleocr":
@@ -143,8 +191,9 @@ class OcrEngine:
             # toi uu cua Paddle Inference dung -> SIGILL (exit 132) trong
             # SelfAttentionFusePass. Tat ir_optim + mkldnn de chay an toan.
             self._backend = PaddleOCR(
-                use_angle_cls=True, lang=lang, show_log=False,
+                use_angle_cls=use_cls, lang=lang, show_log=False,
                 use_gpu=False, enable_mkldnn=False, ir_optim=False,
+                det_limit_side_len=det_side,
             )
         elif engine == "easyocr":
             import easyocr  # lazy import
@@ -165,7 +214,7 @@ class OcrEngine:
 
     def _detect_paddle(self, img_bgr):
         out = []
-        result = self._backend.ocr(img_bgr, cls=True)
+        result = self._backend.ocr(img_bgr, cls=self.use_cls)
         if not result or result[0] is None:
             return out
         for box, (text, conf) in result[0]:
@@ -1462,6 +1511,20 @@ def main():
     ap.add_argument("--tilt", type=float, default=2.0,
                     help="Chu nghieng tu so do nay tro len thi thay hop den to bang chuoi hop nho doc theo duong cheo "
                          "(chi cho chu dung yen, can goc da giac cua OCR: paddleocr/easyocr), 0 = tat")
+    ap.add_argument("--no-skip", action="store_true",
+                    help="Tat bo qua khung khong doi (mac dinh bat: khung gan nhu giong khung OCR gan nhat thi dung lai ket qua cu "
+                         "thay vi OCR lai, nhanh hon nhieu khi chu dung yen; nen dong / chu chuyen dong thi van OCR tung khung)")
+    ap.add_argument("--skip-diff", type=float, default=0.05,
+                    help="Bo qua khung neu ty le diem anh doi (tren anh thu nho, lam mo) < so nay %% (mac dinh 0.05). "
+                         "Lon hon = bo qua nhieu hon, nhanh hon nhung co the bo sot chu moi hien nho/mo")
+    ap.add_argument("--skip-max", type=int, default=8,
+                    help="Toi da so khung lien tiep bo qua truoc khi bat buoc OCR lai (mac dinh 8)")
+    ap.add_argument("--det-side", type=int, default=640,
+                    help="paddleocr: canh dai toi da (px) cua anh dua vao bo do chu, anh lon hon bi thu ve (mac dinh 640; "
+                         "PaddleOCR goc la 960). Nho = nhanh hon, nhung chu nho li ti de bi bo sot; chu cao >= 3,5%% khung hinh thi on")
+    ap.add_argument("--angle-cls", action="store_true",
+                    help="paddleocr: bat bo phan loai huong 0/180 do cho tung o chu (mac dinh tat vi cham them; chu nghieng "
+                         "lay goc tu da giac do chu). Bat neu video co chu bi lat nguoc")
     ap.add_argument("--no-tighten", action="store_true",
                     help="Tat buoc siet hop OCR theo net chu that (mac dinh bat: cat nen thua o mep hop, "
                          "mo rong neu chu bi cat; chi ap dung cho chu thang)")
@@ -1494,18 +1557,27 @@ def main():
     if args.debug_dir:
         os.makedirs(args.debug_dir, exist_ok=True)
 
-    engine = OcrEngine(engine=args.engine, lang=args.lang, min_conf=args.min_conf)
+    engine = OcrEngine(engine=args.engine, lang=args.lang, min_conf=args.min_conf,
+                       det_side=args.det_side, use_cls=args.angle_cls)
+    skipper = None if args.no_skip or args.skip_diff <= 0 else FrameSkipper(args.skip_diff, max(0, args.skip_max))
 
     samples = []
     processed = 0
+    last_blocks = None
     for t, frame in iter_frames(args.video, args.fps):
         roi_img = frame[ry0:ry1, rx0:rx1]
-        if args.scale != 1.0:
-            roi_img = cv2.resize(roi_img, None, fx=args.scale, fy=args.scale,
-                                 interpolation=cv2.INTER_CUBIC)
-        blocks = detect_frame_blocks(engine, roi_img, (rx0, ry0), args.scale,
-                                     cjk_only=not args.keep_non_cjk, min_h=args.min_height * h,
-                                     min_chars=args.min_chars, tighten=not args.no_tighten)
+        if skipper is not None and last_blocks is not None and skipper.should_skip(roi_img):
+            blocks = copy.deepcopy(last_blocks)          # khung giong khung OCR gan nhat: dung lai ket qua
+        else:
+            if skipper is not None and last_blocks is None:
+                skipper.should_skip(roi_img)             # khung OCR dau tien: dat moc so sanh
+            if args.scale != 1.0:
+                roi_img = cv2.resize(roi_img, None, fx=args.scale, fy=args.scale,
+                                     interpolation=cv2.INTER_CUBIC)
+            blocks = detect_frame_blocks(engine, roi_img, (rx0, ry0), args.scale,
+                                         cjk_only=not args.keep_non_cjk, min_h=args.min_height * h,
+                                         min_chars=args.min_chars, tighten=not args.no_tighten)
+            last_blocks = blocks
         samples.append((t, blocks))
 
         if args.debug_dir and processed % args.debug_every == 0:
@@ -1515,6 +1587,9 @@ def main():
         if processed % 100 == 0:
             print(f"...đã xử lý {processed} frame (t={t:.1f}s)", file=sys.stderr)
 
+    if skipper is not None:
+        print(f"Bo qua OCR {skipper.skipped}/{skipper.total} khung giong khung truoc "
+              f"(OCR {skipper.total - skipper.skipped} khung)", file=sys.stderr)
     tracks = build_tracks(samples, step_sec, similarity=args.similarity,
                           max_gap_frames=args.max_gap_frames, min_frames=args.min_frames,
                           merge_sim=args.merge_sim, split_sim=args.split_sim, min_run_sec=args.min_run_sec)

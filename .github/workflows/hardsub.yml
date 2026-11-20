@@ -319,7 +319,7 @@ jobs:
               exit 1
             fi
             python hardsub_extract.py "$SRC" -o "out/$NAME.srtpx" \
-              --engine paddleocr --lang "$LANG_CODE" --fps "$FPS" --roi "$ROI" --workers "$WORKERS" \
+              --engine paddleocr --lang "$LANG_CODE" --fps "$FPS" --roi "$ROI" --workers "$WORKERS" --no-skip \
               --debug-dir "out/debug_$NAME" --debug-every 50 < /dev/null
 
             # ---- Dich Trung -> Viet bang Gemini (thu lai den khi duoc) ----

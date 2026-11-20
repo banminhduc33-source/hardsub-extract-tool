@@ -137,7 +137,7 @@ class App(tk.Tk):
         engine = ENGINES[self.engine.get()]
         cmd = [sys.executable, "-u", SCRIPT, video, "-o", out,
                "--engine", engine, "--lang", LANG_CODES[(engine, self.script.get())],
-               "--fps", str(fps), "--roi", FULL_FRAME_ROI]
+               "--fps", str(fps), "--roi", FULL_FRAME_ROI, "--no-skip"]
         if self.debug.get():
             cmd += ["--debug-dir", os.path.join(os.path.dirname(out) or ".", "debug"), "--debug-every", "20"]
 

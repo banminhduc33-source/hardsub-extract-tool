@@ -23,6 +23,9 @@ on:
       fps:
         description: "So khung hinh/giay quet (nho = nhanh)"
         default: "12"
+      workers:
+        description: "So tien trinh OCR song song (may chuan repo public: 4 nhan -> 2; repo private 2 nhan -> 1)"
+        default: "2"
       lang:
         description: "ch = gian the, chinese_cht = phon the"
         default: "ch"
@@ -144,6 +147,7 @@ jobs:
           VIDEO_URL: ${{ inputs.video_url }}
           VIDEO_PATH: ${{ inputs.video_path }}
           FPS: ${{ inputs.fps || '12' }}
+          WORKERS: ${{ inputs.workers || '2' }}
           ROI: "0,0,1.0,1.0"   # luon OCR toan bo khung hinh
           LANG_CODE: ${{ inputs.lang || 'ch' }}
           TRANSLATE: ${{ github.event_name == 'workflow_dispatch' && inputs.translate == false && 'false' || 'true' }}
@@ -315,7 +319,7 @@ jobs:
               exit 1
             fi
             python hardsub_extract.py "$SRC" -o "out/$NAME.srtpx" \
-              --engine paddleocr --lang "$LANG_CODE" --fps "$FPS" --roi "$ROI" \
+              --engine paddleocr --lang "$LANG_CODE" --fps "$FPS" --roi "$ROI" --workers "$WORKERS" \
               --debug-dir "out/debug_$NAME" --debug-every 50 < /dev/null
 
             # ---- Dich Trung -> Viet bang Gemini (thu lai den khi duoc) ----

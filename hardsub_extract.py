@@ -40,6 +40,7 @@ VI DU:
 import argparse
 import copy
 import math
+import multiprocessing
 import collections
 import difflib
 import os
@@ -61,14 +62,18 @@ def video_info(video_path, target_fps):
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     native_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)       # co the = 0 / sai so nhe tuy codec
     cap.release()
     sample_fps = min(target_fps, native_fps) if target_fps else native_fps
     step = max(1, round(native_fps / sample_fps))
-    return dict(width=w, height=h, native_fps=native_fps, step=step, step_sec=step / native_fps)
+    return dict(width=w, height=h, native_fps=native_fps, step=step, step_sec=step / native_fps, frames=frames)
 
 
-def iter_frames(video_path, target_fps):
-    """Sinh (thoi_gian_giay, frame_BGR) theo target_fps; thoi gian tinh theo FPS goc."""
+def iter_sampled(video_path, target_fps, start_frame=0, end_frame=None):
+    """Sinh (chi_so_mau, thoi_gian_giay, frame_BGR) cho cac khung goc co chi so chia het `step` (cung luoi lay mau voi iter_frames),
+    chi trong [start_frame, end_frame) (end_frame=None: den het video). Quet theo doan van cho dung cac khung va moc thoi gian
+    nhu quet mot mach, nen ghep ket qua cac doan khong can chong lan. Khung truoc start_frame chi bi bo qua (grab, khong chuyen
+    mau) chu khong nhay (seek) vi seek cua OpenCV khong luon chinh xac den tung khung; start_frame nen la boi so cua `step`."""
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise RuntimeError(f"Không mở được video: {video_path}")
@@ -76,14 +81,24 @@ def iter_frames(video_path, target_fps):
     sample_fps = min(target_fps, native_fps) if target_fps else native_fps
     step = max(1, round(native_fps / sample_fps))
     frame_idx = 0
-    while True:
-        ok, frame = cap.read()
-        if not ok:
-            break
-        if frame_idx % step == 0:
-            yield frame_idx / native_fps, frame
-        frame_idx += 1
-    cap.release()
+    try:
+        while end_frame is None or frame_idx < end_frame:
+            if frame_idx >= start_frame and frame_idx % step == 0:
+                ok, frame = cap.read()
+                if not ok:
+                    break
+                yield frame_idx // step, frame_idx / native_fps, frame
+            elif not cap.grab():
+                break
+            frame_idx += 1
+    finally:
+        cap.release()
+
+
+def iter_frames(video_path, target_fps):
+    """Sinh (thoi_gian_giay, frame_BGR) theo target_fps; thoi gian tinh theo FPS goc."""
+    for _k, t, frame in iter_sampled(video_path, target_fps):
+        yield t, frame
 
 
 class FrameSkipper:
@@ -1454,6 +1469,86 @@ def parse_roi(spec, w, h):
     return (round(x1 * w), round(y1 * h), round(x2 * w), round(y2 * h))
 
 
+def scan_samples(engine, video_path, target_fps, start_frame, end_frame, cfg, tag=""):
+    """OCR cac khung lay mau cua video trong [start_frame, end_frame) -> (samples, so_khung_bo_qua, tong_khung).
+    samples = [(thoi_gian_giay, blocks)] dung y nhu quet mot mach (cung luoi lay mau, cung moc thoi gian); khung dau cua doan
+    luon duoc OCR (FrameSkipper bat dau lai). cfg: dict cac tham so quet (xem main)."""
+    rx0, ry0, rx1, ry1 = cfg["roi_px"]
+    scale = cfg["scale"]
+    skipper = FrameSkipper(cfg["skip_diff"], cfg["skip_max"]) if cfg["skip"] else None
+    samples, last_blocks, done = [], None, 0
+    for k, t, frame in iter_sampled(video_path, target_fps, start_frame, end_frame):
+        roi_img = frame[ry0:ry1, rx0:rx1]
+        if skipper is not None and last_blocks is not None and skipper.should_skip(roi_img):
+            blocks = copy.deepcopy(last_blocks)          # khung giong khung OCR gan nhat: dung lai ket qua
+        else:
+            if skipper is not None and last_blocks is None:
+                skipper.should_skip(roi_img)             # khung OCR dau tien: dat moc so sanh
+            if scale != 1.0:
+                roi_img = cv2.resize(roi_img, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+            blocks = detect_frame_blocks(engine, roi_img, (rx0, ry0), scale, cjk_only=cfg["cjk_only"],
+                                         min_h=cfg["min_h"], min_chars=cfg["min_chars"], tighten=cfg["tighten"])
+            last_blocks = blocks
+        samples.append((t, blocks))
+        if cfg["debug_dir"] and k % cfg["debug_every"] == 0:           # k = chi so mau toan video, khong phu thuoc chia doan
+            save_debug_frame(frame, cfg["roi_px"], blocks, os.path.join(cfg["debug_dir"], f"f_{k:06d}.jpg"))
+        done += 1
+        if done % 100 == 0:
+            print(f"...{tag}đã xử lý {done} frame (t={t:.1f}s)", file=sys.stderr)
+    return samples, (skipper.skipped if skipper else 0), (skipper.total if skipper else 0)
+
+
+def split_segments(n_samples, n_segments, step):
+    """Chia n_samples khung lay mau thanh n_segments doan lien tiep -> [(start_frame, end_frame)], end_frame=None o doan cuoi
+    (doc den het video, nen so khung do OpenCV bao sai cung khong lam mat khung nao). Moc cat luon la boi so cua `step`."""
+    bounds = [round(i * n_samples / n_segments) for i in range(n_segments + 1)]
+    return [(bounds[i] * step, bounds[i + 1] * step if i + 1 < n_segments else None) for i in range(n_segments)]
+
+
+_WORKER = {}
+
+
+def _init_scan_worker(cfg):
+    """Moi tien trinh con tu nap OcrEngine rieng (Paddle khong duoc dung chung/fork sau khi da khoi tao)."""
+    _WORKER["engine"] = OcrEngine(engine=cfg["engine"], lang=cfg["lang"], min_conf=cfg["min_conf"],
+                                  det_side=cfg["det_side"], use_cls=cfg["use_cls"])
+    _WORKER["cfg"] = cfg
+
+
+def _scan_job(job):
+    idx, n_jobs, video_path, target_fps, start_frame, end_frame = job
+    return scan_samples(_WORKER["engine"], video_path, target_fps, start_frame, end_frame, _WORKER["cfg"],
+                        tag=f"[doan {idx + 1}/{n_jobs}] ")
+
+
+MIN_SAMPLES_PER_SEGMENT = 30      # doan nao ngan hon nua thi khong dang de nap them mot mo hinh
+SEGMENTS_PER_WORKER = 3           # chia nho hon so tien trinh de can tai (doan it chu/nen tinh chay nhanh hon han)
+
+
+def scan_parallel(video_path, target_fps, info, workers, cfg):
+    """Quet video bang `workers` tien trinh. Tra ve (samples, bo_qua, tong) hoac None neu khong chia duoc (video qua ngan / khong
+    biet so khung) -> nguoi goi chay mot mach. HARDSUB_MP_START=fork|spawn|forkserver de ep cach tao tien trinh (mac dinh theo he dieu hanh)."""
+    n_samples = -(-info["frames"] // info["step"]) if info["frames"] > 0 else 0
+    n_seg = min(workers * SEGMENTS_PER_WORKER, n_samples // MIN_SAMPLES_PER_SEGMENT)
+    if workers < 2 or n_seg < 2:
+        return None
+    workers = min(workers, n_seg)
+    segs = split_segments(n_samples, n_seg, info["step"])
+    jobs = [(i, n_seg, video_path, target_fps, a, b) for i, (a, b) in enumerate(segs)]
+    # Moi tien trinh chi dung ~ cpu/workers luong cho tinh toan; neu nguoi dung da dat OMP_NUM_THREADS thi giu nguyen.
+    os.environ.setdefault("OMP_NUM_THREADS", str(max(1, (os.cpu_count() or 1) // workers)))
+    print(f"Quet song song: {workers} tien trinh, {n_seg} doan, OMP_NUM_THREADS={os.environ['OMP_NUM_THREADS']}",
+          file=sys.stderr)
+    ctx = multiprocessing.get_context(os.environ.get("HARDSUB_MP_START") or None)
+    samples, skipped, total = [], 0, 0
+    with ctx.Pool(workers, initializer=_init_scan_worker, initargs=(cfg,)) as pool:
+        for part, sk, tot in pool.imap(_scan_job, jobs):           # imap: dung thu tu doan, doan xong truoc cung giao viec tiep
+            samples.extend(part)
+            skipped += sk
+            total += tot
+    return samples, skipped, total
+
+
 def main():
     ap = argparse.ArgumentParser(description="Bóc hardsub tiếng Trung từ video ra file .srtpx")
     ap.add_argument("video", help="Đường dẫn file video đầu vào")
@@ -1511,6 +1606,10 @@ def main():
     ap.add_argument("--tilt", type=float, default=2.0,
                     help="Chu nghieng tu so do nay tro len thi thay hop den to bang chuoi hop nho doc theo duong cheo "
                          "(chi cho chu dung yen, can goc da giac cua OCR: paddleocr/easyocr), 0 = tat")
+    ap.add_argument("--workers", type=int, default=1,
+                    help="So tien trinh OCR chay song song (mac dinh 1). Video duoc chia thanh nhieu doan lien tiep (gap 3 lan so tien "
+                         "trinh de can tai), moi tien trinh nap mo hinh rieng (ton RAM gap N lan) roi ghep lai TRUOC buoc gom cau nen "
+                         "cau nam giua hai doan van la mot cau. Nen dat <= so nhan CPU / 2; OMP_NUM_THREADS tu chia deu neu chua dat")
     ap.add_argument("--no-skip", action="store_true",
                     help="Tat bo qua khung khong doi (mac dinh bat: khung gan nhu giong khung OCR gan nhat thi dung lai ket qua cu "
                          "thay vi OCR lai, nhanh hon nhieu khi chu dung yen; nen dong / chu chuyen dong thi van OCR tung khung)")
@@ -1557,39 +1656,22 @@ def main():
     if args.debug_dir:
         os.makedirs(args.debug_dir, exist_ok=True)
 
-    engine = OcrEngine(engine=args.engine, lang=args.lang, min_conf=args.min_conf,
-                       det_side=args.det_side, use_cls=args.angle_cls)
-    skipper = None if args.no_skip or args.skip_diff <= 0 else FrameSkipper(args.skip_diff, max(0, args.skip_max))
+    cfg = dict(engine=args.engine, lang=args.lang, min_conf=args.min_conf, det_side=args.det_side,
+               use_cls=args.angle_cls, roi_px=roi_px, scale=args.scale, cjk_only=not args.keep_non_cjk,
+               min_h=args.min_height * h, min_chars=args.min_chars, tighten=not args.no_tighten,
+               skip=not (args.no_skip or args.skip_diff <= 0), skip_diff=args.skip_diff,
+               skip_max=max(0, args.skip_max), debug_dir=args.debug_dir, debug_every=args.debug_every)
 
-    samples = []
-    processed = 0
-    last_blocks = None
-    for t, frame in iter_frames(args.video, args.fps):
-        roi_img = frame[ry0:ry1, rx0:rx1]
-        if skipper is not None and last_blocks is not None and skipper.should_skip(roi_img):
-            blocks = copy.deepcopy(last_blocks)          # khung giong khung OCR gan nhat: dung lai ket qua
-        else:
-            if skipper is not None and last_blocks is None:
-                skipper.should_skip(roi_img)             # khung OCR dau tien: dat moc so sanh
-            if args.scale != 1.0:
-                roi_img = cv2.resize(roi_img, None, fx=args.scale, fy=args.scale,
-                                     interpolation=cv2.INTER_CUBIC)
-            blocks = detect_frame_blocks(engine, roi_img, (rx0, ry0), args.scale,
-                                         cjk_only=not args.keep_non_cjk, min_h=args.min_height * h,
-                                         min_chars=args.min_chars, tighten=not args.no_tighten)
-            last_blocks = blocks
-        samples.append((t, blocks))
-
-        if args.debug_dir and processed % args.debug_every == 0:
-            save_debug_frame(frame, roi_px, blocks,
-                             os.path.join(args.debug_dir, f"f_{processed:06d}.jpg"))
-        processed += 1
-        if processed % 100 == 0:
-            print(f"...đã xử lý {processed} frame (t={t:.1f}s)", file=sys.stderr)
-
-    if skipper is not None:
-        print(f"Bo qua OCR {skipper.skipped}/{skipper.total} khung giong khung truoc "
-              f"(OCR {skipper.total - skipper.skipped} khung)", file=sys.stderr)
+    res = scan_parallel(args.video, args.fps, info, args.workers, cfg) if args.workers > 1 else None
+    if res is None:
+        if args.workers > 1:
+            print("Video qua ngan hoac khong biet so khung -> quet mot mach", file=sys.stderr)
+        engine = OcrEngine(engine=args.engine, lang=args.lang, min_conf=args.min_conf,
+                           det_side=args.det_side, use_cls=args.angle_cls)
+        res = scan_samples(engine, args.video, args.fps, 0, None, cfg)
+    samples, skipped, total = res
+    if cfg["skip"]:
+        print(f"Bo qua OCR {skipped}/{total} khung giong khung truoc (OCR {total - skipped} khung)", file=sys.stderr)
     tracks = build_tracks(samples, step_sec, similarity=args.similarity,
                           max_gap_frames=args.max_gap_frames, min_frames=args.min_frames,
                           merge_sim=args.merge_sim, split_sim=args.split_sim, min_run_sec=args.min_run_sec)

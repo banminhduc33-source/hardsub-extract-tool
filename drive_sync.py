@@ -14,7 +14,7 @@ Cài đặt:
 Chạy:
     python drive_sync.py                 # chạy liên tục, quét mỗi 30 giây
     python drive_sync.py --once          # quét một lần rồi thoát
-    python drive_sync.py --extract-args "--engine paddleocr --lang ch --fps 12 --roi 0,0.75,1,1"
+    python drive_sync.py --extract-args "--engine paddleocr --lang ch --fps 30 --roi 0,0.75,1,1"
 """
 import argparse
 import os
@@ -140,7 +140,7 @@ def main():
     ap.add_argument("--in-name", default="in")
     ap.add_argument("--out-name", default="out")
     ap.add_argument("--script", default=str(HERE / "hardsub_extract.py"))
-    ap.add_argument("--extract-args", default="--engine paddleocr --lang ch --fps 12",
+    ap.add_argument("--extract-args", default="--engine paddleocr --lang ch --fps 30",
                     help="tham số truyền thêm cho hardsub_extract.py")
     ap.add_argument("--interval", type=int, default=30, help="giây giữa mỗi lần quét")
     ap.add_argument("--settle", type=int, default=20,

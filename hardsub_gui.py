@@ -62,7 +62,7 @@ class App(tk.Tk):
         self.engine = tk.StringVar(value=list(ENGINES)[0])
         self.script = tk.StringVar(value="Giản thể")
         self.roi = tk.StringVar(value=list(ROI_PRESETS)[0])
-        self.fps = tk.StringVar(value="12")
+        self.fps = tk.StringVar(value="30")
         self.debug = tk.BooleanVar(value=True)
         self.translate = tk.BooleanVar(value=True)
 

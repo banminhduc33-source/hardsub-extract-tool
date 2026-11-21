@@ -34,7 +34,7 @@ NGUYEN LY:
 
 CAI DAT:  pip install opencv-python-headless numpy pillow paddleocr paddlepaddle
 VI DU:
-  python3 hardsub_extract.py video.mp4 -o ketqua.srtpx --engine paddleocr --lang ch --fps 12
+  python3 hardsub_extract.py video.mp4 -o ketqua.srtpx --engine paddleocr --lang ch --fps 30
 """
 
 import argparse
@@ -1409,7 +1409,7 @@ def main():
     ap = argparse.ArgumentParser(description="Bóc hardsub tiếng Trung từ video ra file .srtpx")
     ap.add_argument("video", help="Đường dẫn file video đầu vào")
     ap.add_argument("-o", "--output", required=True, help="File .srtpx đầu ra")
-    ap.add_argument("--fps", type=float, default=12.0, help="FPS lấy mẫu khung hình (mặc định 12)")
+    ap.add_argument("--fps", type=float, default=30.0, help="FPS lấy mẫu khung hình (mặc định 30)")
     ap.add_argument("--roi", default="0,0,1.0,1.0",
                     help="Vùng quét, phân số x1,y1,x2,y2 (mặc định toàn khung hình)")
     ap.add_argument("--engine", choices=["tesseract", "easyocr", "paddleocr"], default="tesseract")

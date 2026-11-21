@@ -430,19 +430,31 @@ def _poly_vertical(b):
     return h >= 1.5 * w
 
 
+def _poly_area(poly):
+    """Dien tich da giac (cong thuc day giay)."""
+    return abs(sum(poly[i][0] * poly[(i + 1) % len(poly)][1] - poly[(i + 1) % len(poly)][0] * poly[i][1]
+                   for i in range(len(poly)))) / 2.0
+
+
 def detect_frame_blocks(engine, roi_img, roi_offset, scale, cjk_only=True, min_h=0.0, min_chars=1,
-                        tighten=False, skip_vertical=True):
+                        tighten=False, skip_vertical=True, max_area=0.0):
     """OCR 1 frame da crop ROI -> list khoi chu, toa do quy ve khung hinh goc.
 
     Chi giu chu LON, ro (hien thi tren man hinh): bo o chu cao < min_h px (chu li ti trong bang/UI/watermark)
     va bo khoi co it hon min_chars chu. tighten=True: siet hop OCR theo net chu (tighten_box), chi cho chu thang.
-    skip_vertical=True: bo moi o chu/da giac DOC (khong quet, khong dua vao phu de)."""
+    skip_vertical=True: bo moi o chu/da giac DOC (khong quet, khong dua vao phu de).
+    max_area > 0: dien tich toi da (px khung goc) cua 1 hop; hop OCR hoac khoi chu lon hon bi loai CA hinh lan chu."""
     ox, oy = roi_offset
     gray = cv2.cvtColor(roi_img, cv2.COLOR_BGR2GRAY) if tighten and roi_img.ndim == 3 else None
     boxes = []
     for b in engine.detect(roi_img):
         if skip_vertical and _poly_vertical(b):
             continue
+        if max_area > 0:
+            area = (_poly_area(b["poly"]) if b.get("poly") and len(b["poly"]) >= 3
+                    else (b["x_max"] - b["x_min"]) * (b["y_max"] - b["y_min"])) / (scale * scale)
+            if area > max_area:
+                continue
         y_min, y_max = b["y_min"] / scale + oy, b["y_max"] / scale + oy
         if y_max - y_min < min_h:
             continue
@@ -455,6 +467,9 @@ def detect_frame_blocks(engine, roi_img, roi_offset, scale, cjk_only=True, min_h
                           x_min=x_min, x_max=x_max,
                           y_min=y_min, y_max=y_max, poly=poly))
     blocks = build_blocks(boxes, cjk_only)
+    if max_area > 0:
+        blocks = [bl for bl in blocks
+                  if (bl["bbox"][1] - bl["bbox"][0]) * (bl["bbox"][3] - bl["bbox"][2]) <= max_area]
     return [bl for bl in blocks if count_chars(bl["text"], cjk_only) >= min_chars]
 
 
@@ -1475,6 +1490,9 @@ def main():
                     help="Chu nghieng: quad = dong 'Đa giác:' (dung yen) / 'KP' (chuyen dong), 4 goc that (can srtpx_cover moi); "
                          "cover = chuoi hop chu nhat nho doc duong cheo (phan mem doc cu). "
                          "Chu nghieng + chuyen dong: dong 'KP' (da giac theo keyframe)")
+    ap.add_argument("--max-box-area", type=float, default=0.25,
+                    help="Hop (OCR hoac khoi chu) co dien tich lon hon ty le nay cua khung hinh thi LOAI ca hinh lan chu "
+                         "(mac dinh 0.25 = 1/4 khung hinh); 0 = tat")
     ap.add_argument("--keep-vertical", action="store_true",
                     help="Giu lai chu/da giac DOC (mac dinh BO, khong quet bat ky o chu doc nao)")
     ap.add_argument("--no-poly-secondary", action="store_true",
@@ -1528,7 +1546,8 @@ def main():
         blocks = detect_frame_blocks(engine, roi_img, (rx0, ry0), args.scale,
                                      cjk_only=not args.keep_non_cjk, min_h=args.min_height * h,
                                      min_chars=args.min_chars, tighten=not args.no_tighten,
-                                     skip_vertical=not args.keep_vertical)
+                                     skip_vertical=not args.keep_vertical,
+                                     max_area=args.max_box_area * w * h)
         samples.append((t, blocks))
 
         if args.debug_dir and processed % args.debug_every == 0:

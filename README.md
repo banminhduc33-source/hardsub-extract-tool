@@ -54,6 +54,7 @@ Fps càng cao thì mốc thời gian càng sát (30fps khớp mẫu nhất) như
 | `--min-frames` / `--max-gap-frames` | Lọc nhiễu / chịu được OCR chớp tắt |
 | `--min-height` | Chỉ lấy chữ cao ít nhất tỉ lệ này so với chiều cao video (mặc định 0.035 = 3.5%), bỏ chữ li ti trong bảng/giao diện; `0` = tắt |
 | `--min-chars` | Khối chữ phải có ít nhất ngần này chữ mới lấy (mặc định 2) |
+| `--keep-vertical` | Giữ lại chữ/đa giác **dọc** (mặc định **bỏ**: không quét bất kỳ ô chữ dọc nào — cạnh dài của đa giác chạy theo phương dọc và dài hơn cạnh ngắn ≥ 1.2 lần; chữ ngang nghiêng nhẹ vẫn được quét) |
 | `--no-poly-secondary` | Tắt chế độ "mọi phụ đề phụ đều là đa giác" (mặc định **bật**, chỉ với `--tilt-mode quad`): khi bật, mọi câu **không** thuộc phụ đề chính đều xuất dòng `Đa giác:` / `KP` (kể cả chữ thẳng, cột chữ dọc, câu ngắn, thẻ chữ bay + xoay); phụ đề chính vẫn là hộp chữ nhật đen. Khi tắt, chỉ chữ nghiêng từ `--tilt` độ trở lên mới thành đa giác |
 | `--tilt` | Chữ nghiêng từ ngần này độ trở lên (mặc định 2, `0` = tắt) thì thay hộp đen to bằng 1 hộp chính (có chữ) + chuỗi hộp nhỏ không chữ chạy theo đường chéo. Dùng được cả khi chữ **vừa nghiêng/xoay vừa chuyển động** (mỗi hộp có KF riêng) và khi chữ nghiêng tới 80°; cần engine có góc đa giác (paddleocr/easyocr) |
 | `--pad` | Nở hộp đen ra mỗi phía = số này × chiều cao 1 dòng chữ, để che hết viền/bóng chữ (mặc định 0.05, tối thiểu 2px: hộp sát chữ; `0` = tắt) |

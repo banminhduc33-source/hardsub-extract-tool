@@ -413,16 +413,36 @@ def _axis_aligned(poly, tol_deg=2.0):
     return min(ang, 90.0 - ang) <= tol_deg
 
 
+def _poly_vertical(b):
+    """O chu/da giac DOC: canh dai cua da giac chay theo phuong doc (goc > 45 do so voi ngang) va dai hon canh
+    ngan it nhat 1.2 lan (o gan vuong nhu 1 chu don khong tinh la doc). Khong co da giac -> dung hop bao
+    (cao >= 1.5 x rong). Chu ngang nghieng nhe van la ngang."""
+    poly = b.get("poly")
+    if poly and len(poly) >= 3:
+        e1 = (poly[1][0] - poly[0][0], poly[1][1] - poly[0][1])
+        e2 = (poly[2][0] - poly[1][0], poly[2][1] - poly[1][1])
+        l1, l2 = math.hypot(*e1), math.hypot(*e2)
+        long_e, long_l, short_l = (e1, l1, l2) if l1 >= l2 else (e2, l2, l1)
+        if long_l < 1.2 * max(short_l, 1e-6):
+            return False
+        return abs(long_e[1]) > abs(long_e[0])
+    w, h = b["x_max"] - b["x_min"], b["y_max"] - b["y_min"]
+    return h >= 1.5 * w
+
+
 def detect_frame_blocks(engine, roi_img, roi_offset, scale, cjk_only=True, min_h=0.0, min_chars=1,
-                        tighten=False):
+                        tighten=False, skip_vertical=True):
     """OCR 1 frame da crop ROI -> list khoi chu, toa do quy ve khung hinh goc.
 
     Chi giu chu LON, ro (hien thi tren man hinh): bo o chu cao < min_h px (chu li ti trong bang/UI/watermark)
-    va bo khoi co it hon min_chars chu. tighten=True: siet hop OCR theo net chu (tighten_box), chi cho chu thang."""
+    va bo khoi co it hon min_chars chu. tighten=True: siet hop OCR theo net chu (tighten_box), chi cho chu thang.
+    skip_vertical=True: bo moi o chu/da giac DOC (khong quet, khong dua vao phu de)."""
     ox, oy = roi_offset
     gray = cv2.cvtColor(roi_img, cv2.COLOR_BGR2GRAY) if tighten and roi_img.ndim == 3 else None
     boxes = []
     for b in engine.detect(roi_img):
+        if skip_vertical and _poly_vertical(b):
+            continue
         y_min, y_max = b["y_min"] / scale + oy, b["y_max"] / scale + oy
         if y_max - y_min < min_h:
             continue
@@ -1455,6 +1475,8 @@ def main():
                     help="Chu nghieng: quad = dong 'Đa giác:' (dung yen) / 'KP' (chuyen dong), 4 goc that (can srtpx_cover moi); "
                          "cover = chuoi hop chu nhat nho doc duong cheo (phan mem doc cu). "
                          "Chu nghieng + chuyen dong: dong 'KP' (da giac theo keyframe)")
+    ap.add_argument("--keep-vertical", action="store_true",
+                    help="Giu lai chu/da giac DOC (mac dinh BO, khong quet bat ky o chu doc nao)")
     ap.add_argument("--no-poly-secondary", action="store_true",
                     help="Tat che do 'moi phu de phu deu la da giac' (mac dinh bat, chi voi --tilt-mode quad): "
                          "khi bat, moi cau KHONG thuoc phu de chinh deu xuat dong 'Đa giác:' / 'KP' (ke ca chu thang, cot chu doc, "
@@ -1505,7 +1527,8 @@ def main():
                                  interpolation=cv2.INTER_CUBIC)
         blocks = detect_frame_blocks(engine, roi_img, (rx0, ry0), args.scale,
                                      cjk_only=not args.keep_non_cjk, min_h=args.min_height * h,
-                                     min_chars=args.min_chars, tighten=not args.no_tighten)
+                                     min_chars=args.min_chars, tighten=not args.no_tighten,
+                                     skip_vertical=not args.keep_vertical)
         samples.append((t, blocks))
 
         if args.debug_dir and processed % args.debug_every == 0:
